@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Enable Banking",
+        "description": "Enter your Enable Banking application details. The private key must be a file inside /config (never paste it here). The redirect URL must be EXACTLY one of those registered for your application.\n\nCurrently registered URLs: {registered}",
+        "data": {
+          "application_id": "Application ID",
+          "private_key_path": "Private key file path",
+          "aspsp_name": "Bank (exact name)",
+          "aspsp_country": "Bank country (2 letters)",
+          "redirect_url": "Redirect URL"
+        },
+        "data_description": {
+          "private_key_path": "For example /config/enablebanking/private.key",
+          "redirect_url": "Must end with /enablebanking/callback"
+        }
+      },
+      "authorize": {
+        "title": "Authorise access at your bank",
+        "description": "Your bank's page opens in another window. Complete the login there and come back: the setup continues by itself."
+      },
+      "reauth_confirm": {
+        "title": "Renew authorisation",
+        "description": "The authorisation with the bank has expired. Press Submit to authorise access again."
+      }
+    },
+    "error": {
+      "key_not_found": "The private key file was not found at that path.",
+      "key_path_not_allowed": "The key must be inside /config (and NEVER in /config/www, which is public).",
+      "invalid_key": "The file is not a valid RSA private key (it should start with -----BEGIN).",
+      "invalid_auth": "Enable Banking rejected the application ID or key.",
+      "cannot_connect": "Cannot connect to Enable Banking.",
+      "redirect_bad_path": "The redirect URL must end with /enablebanking/callback.",
+      "redirect_not_registered": "That URL is not registered for your Enable Banking application. Registered: {registered}",
+      "unknown": "Unexpected error. Check the Home Assistant log."
+    },
+    "abort": {
+      "already_configured": "This bank is already configured with that application.",
+      "authorization_failed": "Authorisation failed: {error}",
+      "session_failed": "Could not create the session: {error}",
+      "no_accounts": "The bank did not share any account.",
+      "key_not_found": "The private key file was not found.",
+      "reauth_successful": "Authorisation renewed successfully."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Enable Banking options",
+        "data": {
+          "scan_interval_hours": "Hours between updates",
+          "transaction_days": "Days of transactions (0 = whatever the bank decides)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {"name": "Balance"},
+      "last_transaction": {"name": "Last transaction"}
+    }
+  },
+  "services": {
+    "get_transactions": {
+      "name": "Get transactions",
+      "description": "Returns the transactions and balances stored at the last update, with all their data.",
+      "fields": {
+        "limit": {"name": "Limit", "description": "Maximum number of transactions per account."},
+        "iban": {"name": "IBAN", "description": "Filter by one account (optional)."}
+      }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Enable Banking",
+        "description": "Introduce los datos de tu aplicación de Enable Banking. La clave privada debe estar en un archivo dentro de /config (no se pega aquí). La URL de redirección debe ser EXACTAMENTE una de las registradas en tu aplicación.\n\nURLs registradas actualmente: {registered}",
+        "data": {
+          "application_id": "ID de la aplicación",
+          "private_key_path": "Ruta del archivo de clave privada",
+          "aspsp_name": "Banco (nombre exacto)",
+          "aspsp_country": "País del banco (2 letras)",
+          "redirect_url": "URL de redirección"
+        },
+        "data_description": {
+          "private_key_path": "Por ejemplo /config/enablebanking/private.key",
+          "redirect_url": "Debe terminar en /enablebanking/callback"
+        }
+      },
+      "authorize": {
+        "title": "Autoriza el acceso en tu banco",
+        "description": "Se abrirá la página de tu banco en otra ventana. Completa el acceso allí y vuelve aquí: el proceso continuará solo."
+      },
+      "reauth_confirm": {
+        "title": "Renueva la autorización",
+        "description": "La autorización con el banco ha caducado. Pulsa Enviar para volver a autorizar el acceso."
+      }
+    },
+    "error": {
+      "key_not_found": "No se encuentra el archivo de clave privada en esa ruta.",
+      "key_path_not_allowed": "La clave debe estar dentro de /config (y NUNCA en /config/www, que es público).",
+      "invalid_key": "El archivo no es una clave privada RSA válida (debe empezar por -----BEGIN).",
+      "invalid_auth": "Enable Banking rechazó el ID de aplicación o la clave.",
+      "cannot_connect": "No se puede conectar con Enable Banking.",
+      "redirect_bad_path": "La URL de redirección debe terminar en /enablebanking/callback.",
+      "redirect_not_registered": "Esa URL no está registrada en tu aplicación de Enable Banking. Registradas: {registered}",
+      "unknown": "Error inesperado. Revisa el registro de Home Assistant."
+    },
+    "abort": {
+      "already_configured": "Este banco ya está configurado con esa aplicación.",
+      "authorization_failed": "La autorización falló: {error}",
+      "session_failed": "No se pudo crear la sesión: {error}",
+      "no_accounts": "El banco no ha compartido ninguna cuenta.",
+      "key_not_found": "No se encuentra el archivo de clave privada.",
+      "reauth_successful": "Autorización renovada correctamente."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Opciones de Enable Banking",
+        "data": {
+          "scan_interval_hours": "Horas entre consultas",
+          "transaction_days": "Días de movimientos (0 = lo que decida el banco)"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {"name": "Saldo"},
+      "last_transaction": {"name": "Último movimiento"}
+    }
+  },
+  "services": {
+    "get_transactions": {
+      "name": "Obtener movimientos",
+      "description": "Devuelve los movimientos y saldos guardados en la última actualización, con todos sus datos.",
+      "fields": {
+        "limit": {"name": "Límite", "description": "Número máximo de movimientos por cuenta."},
+        "iban": {"name": "IBAN", "description": "Filtrar por una cuenta concreta (opcional)."}
+      }
+    }
+  }
+}
