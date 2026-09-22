@@ -23,21 +23,31 @@ DEFAULT_RULES = """\
 # Las reglas se prueban en orden; gana la primera que coincida.
 rules:
   - category: Alimentación
-    contains: ["mercadona", "lidl", "carrefour", "dia", "aldi", "eroski"]
+    contains: ["mercadona", "lidl", "carrefour", "dia", "aldi", "eroski", "froiz", "hipercor", "supermercado", "supermercados"]
   - category: Restauración
-    contains: ["restaurante", "cafeteria", "cafetería", "bar "]
+    contains: ["restaurante", "cafeteria", "cafetería", "bar ", "meson", "cafe-bar"]
   - category: Transporte
-    contains: ["renfe", "metro", "emt", "uber", "cabify", "gasolinera", "repsol", "cepsa"]
+    contains: ["renfe", "metro", "emt", "uber", "cabify", "gasolinera", "repsol", "cepsa", "parking", "aparcamiento"]
   - category: Vivienda
     contains: ["alquiler", "hipoteca", "comunidad de propietarios"]
   - category: Suministros
-    contains: ["endesa", "iberdrola", "naturgy", "movistar", "vodafone", "orange"]
+    contains: ["endesa", "iberdrola", "naturgy", "movistar", "vodafone", "orange", "virgin mobile"]
   - category: Ocio
-    contains: ["netflix", "spotify", "cine", "hbo", "disney+"]
+    contains: ["netflix", "spotify", "cine", "hbo", "disney+", "prime video"]
   - category: Salud
     contains: ["farmacia", "clinica", "clínica", "seguro medico", "seguro médico"]
+  - category: Compras
+    contains: ["amazon", "wallapop"]
+  - category: Hogar
+    contains: ["leroy merlin", "bricodepot", "bricomart", "brico depot"]
+  - category: Educación
+    contains: ["colegio", "academia", "universidad", "escuela"]
+  - category: Seguros
+    contains: ["seguro", "aseguradora"]
+  - category: Finanzas
+    contains: ["prestamo", "tarjetas de credito", "liquidacion"]
   - category: Nómina/Ingresos
-    contains: ["nomina", "nómina", "payroll"]
+    contains: ["nomina", "nómina", "transferencia"]
 """
 
 
