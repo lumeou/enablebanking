@@ -294,6 +294,12 @@ class Store:
                     {**n, "account_hash": account_hash, "now": now})
         return {"new": new_rows, "updated": updated, "unchanged": unchanged}
 
+    def has_transaction_id(self, transaction_id: int) -> bool:
+        with self._lock:
+            return self.conn.execute(
+                "SELECT 1 FROM transactions WHERE id=?", (transaction_id,)
+            ).fetchone() is not None
+
     def query_transactions(
         self,
         account_hashes: list[str] | None = None,
@@ -339,9 +345,9 @@ class Store:
         clause = ("WHERE " + " AND ".join(where)) if where else ""
         direction_sql = "ASC" if order == "asc" else "DESC"
         columns = ("id, account_hash, status, entry_reference, booking_date, value_date, transaction_date, "
-                   "amount, currency, indicator, counterparty, counterparty_iban, remittance, note, mcc, "
-                   "bank_code, bank_code_desc, balance_after, reference_number, category, category_source, "
-                   "first_seen, revisions" + (", raw_json" if include_raw else ""))
+                   "effective_date, amount, currency, indicator, counterparty, counterparty_iban, remittance, "
+                   "note, mcc, bank_code, bank_code_desc, balance_after, reference_number, category, "
+                   "category_source, first_seen, revisions" + (", raw_json" if include_raw else ""))
         with self._lock:
             total = self.conn.execute(f"SELECT COUNT(*) FROM transactions {clause}", params).fetchone()[0]
             rows = self.conn.execute(

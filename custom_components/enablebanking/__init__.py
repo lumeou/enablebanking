@@ -83,32 +83,85 @@ EXPORT_SCHEMA = vol.Schema({
 SET_CATEGORY_SCHEMA = vol.Schema({
     vol.Required("transaction_id"): vol.Coerce(int),
     vol.Required("category"): cv.string,
+    vol.Optional("account_iban"): cv.string,
 })
 
-RECATEGORIZE_SCHEMA = vol.Schema({vol.Optional("only_uncategorized", default=True): cv.boolean})
+RECATEGORIZE_SCHEMA = vol.Schema({
+    vol.Optional("only_uncategorized", default=True): cv.boolean,
+    vol.Optional("account_iban"): cv.string,
+})
 
-LIST_UNCATEGORIZED_SCHEMA = vol.Schema(
-    {vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=200))}
-)
-
-
-def _resolve_accounts(hass: HomeAssistant, iban: str | None) -> list[tuple[ConfigEntry, EnableBankingCoordinator, dict]]:
-    """All (entry, coordinator, account) loaded and, if `iban` given, matching it."""
-    wanted = (iban or "").replace(" ", "").upper()
-    out = []
-    for entry in hass.config_entries.async_entries(DOMAIN):
-        if entry.state is not ConfigEntryState.LOADED:
-            continue
-        coordinator: EnableBankingCoordinator = entry.runtime_data
-        for account in coordinator.accounts:
-            if wanted and account.get("iban", "").replace(" ", "").upper() != wanted:
-                continue
-            out.append((entry, coordinator, account))
-    return out
+LIST_UNCATEGORIZED_SCHEMA = vol.Schema({
+    vol.Optional("limit", default=20): vol.All(vol.Coerce(int), vol.Range(min=1, max=200)),
+    vol.Optional("account_iban"): cv.string,
+})
 
 
-def _account_hashes(hass: HomeAssistant, iban: str | None) -> list[str]:
-    return [a["identification_hash"] for _, _, a in _resolve_accounts(hass, iban)]
+def _loaded_entries(hass: HomeAssistant) -> list[ConfigEntry]:
+    return [e for e in hass.config_entries.async_entries(DOMAIN) if e.state is ConfigEntryState.LOADED]
+
+
+def _target_entries(hass: HomeAssistant, iban: str | None) -> list[ConfigEntry]:
+    """All loaded entries, or just the one(s) owning `iban` if given."""
+    entries = _loaded_entries(hass)
+    if not iban:
+        return entries
+    wanted = iban.replace(" ", "").upper()
+    matching = [
+        e for e in entries
+        if any(a.get("iban", "").replace(" ", "").upper() == wanted for a in e.runtime_data.accounts)
+    ]
+    if not matching:
+        raise ServiceValidationError(f"No account matches IBAN {iban}")
+    return matching
+
+
+def _account_hashes_for(entry: ConfigEntry, iban: str | None) -> list[str] | None:
+    """None means 'every account of this entry' (used when no iban filter was given)."""
+    if not iban:
+        return None
+    wanted = iban.replace(" ", "").upper()
+    return [
+        a["identification_hash"] for a in entry.runtime_data.accounts
+        if a.get("iban", "").replace(" ", "").upper() == wanted
+    ]
+
+
+async def _gather_rows(hass: HomeAssistant, call: ServiceCall) -> list[dict[str, Any]]:
+    """Query every relevant bank's local database and merge the results.
+
+    Each config entry keeps its own SQLite file, so a filter like account_iban
+    or a plain "give me everything" has to be run against each one separately
+    and combined here - a single entry's database never has another bank's data.
+    """
+    iban = call.data.get("account_iban")
+    entries = _target_entries(hass, iban)
+    all_rows: list[dict[str, Any]] = []
+    for entry in entries:
+        store: Store = entry.runtime_data.store
+        hashes = _account_hashes_for(entry, iban)
+
+        def _query(store: Store = store, hashes: list[str] | None = hashes) -> tuple[list[dict], int]:
+            return store.query_transactions(
+                account_hashes=hashes,
+                date_from=call.data.get("date_from").isoformat() if call.data.get("date_from") else None,
+                date_to=call.data.get("date_to").isoformat() if call.data.get("date_to") else None,
+                direction=call.data.get("direction"), min_amount=call.data.get("min_amount"),
+                max_amount=call.data.get("max_amount"), text=call.data.get("text"),
+                category=call.data.get("category"), include_pending=call.data.get("include_pending", False),
+                limit=MAX_SERVICE_RESULTS * 20, offset=0,
+            )
+
+        rows, _total = await hass.async_add_executor_job(_query)
+        for row in rows:
+            row["bank"] = entry.title
+        all_rows.extend(rows)
+    return all_rows
+
+
+def _sort_rows(rows: list[dict[str, Any]], order: str) -> list[dict[str, Any]]:
+    reverse = order != "asc"
+    return sorted(rows, key=lambda r: (r.get("effective_date") or "", r["id"]), reverse=reverse)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -117,43 +170,19 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     async def _svc_sync_now(call: ServiceCall) -> ServiceResponse:
         results = {}
-        for entry in hass.config_entries.async_entries(DOMAIN):
-            if entry.state is not ConfigEntryState.LOADED:
-                continue
+        for entry in _loaded_entries(hass):
             coordinator: EnableBankingCoordinator = entry.runtime_data
             results[entry.title] = await coordinator.async_request_sync(force=call.data["force"])
         return {"results": results}
 
     async def _svc_get_transactions(call: ServiceCall) -> ServiceResponse:
-        hashes = _account_hashes(hass, call.data.get("account_iban"))
-        if call.data.get("account_iban") and not hashes:
-            raise ServiceValidationError("No account matches that IBAN")
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            return {"transactions": [], "total": 0}
-        store: Store = entry.runtime_data.store
-        rows, total = await hass.async_add_executor_job(
-            lambda: store.query_transactions(
-                account_hashes=hashes if call.data.get("account_iban") else None,
-                date_from=call.data.get("date_from").isoformat() if call.data.get("date_from") else None,
-                date_to=call.data.get("date_to").isoformat() if call.data.get("date_to") else None,
-                direction=call.data.get("direction"), min_amount=call.data.get("min_amount"),
-                max_amount=call.data.get("max_amount"), text=call.data.get("text"),
-                category=call.data.get("category"), include_pending=call.data["include_pending"],
-                limit=call.data["limit"], offset=call.data["offset"], order=call.data["order"],
-            )
-        )
-        return {"transactions": rows, "total": total}
+        rows = _sort_rows(await _gather_rows(hass, call), call.data["order"])
+        total = len(rows)
+        offset, limit = call.data["offset"], call.data["limit"]
+        return {"transactions": rows[offset : offset + limit], "total": total}
 
-    def _summarize(store: Store, hashes: list[str] | None, call: ServiceCall) -> dict[str, Any]:
-        rows, _ = store.query_transactions(
-            account_hashes=hashes,
-            date_from=call.data.get("date_from").isoformat() if call.data.get("date_from") else None,
-            date_to=call.data.get("date_to").isoformat() if call.data.get("date_to") else None,
-            direction=call.data.get("direction"), min_amount=call.data.get("min_amount"),
-            max_amount=call.data.get("max_amount"), text=call.data.get("text"),
-            category=call.data.get("category"), include_pending=False, limit=100000, offset=0,
-        )
+    async def _svc_get_summary(call: ServiceCall) -> ServiceResponse:
+        rows = await _gather_rows(hass, call)
         group_by = call.data["group_by"]
         groups: dict[str, dict[str, float]] = {}
         income = expense = 0.0
@@ -168,7 +197,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             elif group_by == "month":
                 key = (row["booking_date"] or row["value_date"] or "")[:7] or "Sin fecha"
             elif group_by == "account":
-                key = row["account_hash"]
+                key = f"{row['bank']} · {row['account_hash']}"
             else:
                 key = row["counterparty"] or "Desconocido"
             bucket = groups.setdefault(key, {"income": 0.0, "expense": 0.0, "count": 0})
@@ -185,36 +214,13 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                       for k, v in groups.items()},
         }
 
-    async def _svc_get_summary(call: ServiceCall) -> ServiceResponse:
-        hashes = _account_hashes(hass, call.data.get("account_iban")) if call.data.get("account_iban") else None
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            return {"income": 0, "expense": 0, "net": 0, "transaction_count": 0, "groups": {}}
-        store: Store = entry.runtime_data.store
-        return await hass.async_add_executor_job(_summarize, store, hashes, call)
-
     async def _svc_export(call: ServiceCall) -> ServiceResponse:
-        hashes = _account_hashes(hass, call.data.get("account_iban")) if call.data.get("account_iban") else None
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            raise ServiceValidationError("No Enable Banking account is set up")
-        store: Store = entry.runtime_data.store
-        rows, _ = await hass.async_add_executor_job(
-            lambda: store.query_transactions(
-                account_hashes=hashes,
-                date_from=call.data.get("date_from").isoformat() if call.data.get("date_from") else None,
-                date_to=call.data.get("date_to").isoformat() if call.data.get("date_to") else None,
-                direction=call.data.get("direction"), min_amount=call.data.get("min_amount"),
-                max_amount=call.data.get("max_amount"), text=call.data.get("text"),
-                category=call.data.get("category"), include_pending=False, limit=MAX_SERVICE_RESULTS * 20, offset=0,
-            )
-        )
+        rows = _sort_rows(await _gather_rows(hass, call), "desc")
         out_dir = Path(hass.config.path(DB_DIR, "exports"))
         await hass.async_add_executor_job(lambda: out_dir.mkdir(parents=True, exist_ok=True))
         stamp = dt_util.now().strftime("%Y%m%d_%H%M%S")
         fmt = call.data["format"]
-        filename = f"transactions_{stamp}.{fmt}"
-        path = out_dir / filename
+        path = out_dir / f"transactions_{stamp}.{fmt}"
 
         def _write() -> None:
             if fmt == "json":
@@ -231,34 +237,40 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         return {"path": str(path), "count": len(rows)}
 
     async def _svc_set_category(call: ServiceCall) -> ServiceResponse:
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            raise ServiceValidationError("No Enable Banking account is set up")
-        store: Store = entry.runtime_data.store
+        tx_id = call.data["transaction_id"]
+        candidates = _target_entries(hass, call.data.get("account_iban"))
+        matches = [
+            e for e in candidates
+            if await hass.async_add_executor_job(e.runtime_data.store.has_transaction_id, tx_id)
+        ]
+        if not matches:
+            raise ServiceValidationError(f"No transaction with id {tx_id}")
+        if len(matches) > 1:
+            names = ", ".join(e.title for e in matches)
+            raise ServiceValidationError(
+                f"Transaction id {tx_id} exists in more than one bank ({names}); "
+                "pass account_iban to say which one"
+            )
+        store: Store = matches[0].runtime_data.store
 
         def _set() -> int:
             with store._lock, store.conn:  # noqa: SLF001 - simple enough to not warrant a Store method
                 cur = store.conn.execute(
                     "UPDATE transactions SET category=?, category_source='manual' WHERE id=?",
-                    (call.data["category"], call.data["transaction_id"]))
+                    (call.data["category"], tx_id))
                 return cur.rowcount
 
-        updated = await hass.async_add_executor_job(_set)
-        if not updated:
-            raise ServiceValidationError(f"No transaction with id {call.data['transaction_id']}")
-        return {"updated": updated}
+        await hass.async_add_executor_job(_set)
+        return {"updated": 1, "bank": matches[0].title}
 
     async def _svc_recategorize(call: ServiceCall) -> ServiceResponse:
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            return {"updated": 0}
-        store: Store = entry.runtime_data.store
+        entries = _target_entries(hass, call.data.get("account_iban"))
         rules_path = hass.config.path(DB_DIR, "categories.yaml")
+        await hass.async_add_executor_job(ensure_rules_file, rules_path)
+        rules = await hass.async_add_executor_job(load_rules, rules_path)
 
-        def _run() -> int:
-            ensure_rules_file(rules_path)
-            rules = load_rules(rules_path)
-            # Manual corrections are never overwritten by rules, regardless of only_uncategorized.
+        def _run(store: Store) -> int:
+            # Manual corrections (category_source='manual') are never overwritten by rules.
             rows = store.conn.execute(
                 "SELECT id, counterparty, remittance, mcc FROM transactions "
                 "WHERE (category_source IS NULL OR category_source!='manual')"
@@ -275,23 +287,32 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                         updated += 1
             return updated
 
-        updated = await hass.async_add_executor_job(_run)
-        return {"updated": updated}
+        total_updated = 0
+        for entry in entries:
+            total_updated += await hass.async_add_executor_job(_run, entry.runtime_data.store)
+        return {"updated": total_updated}
 
     async def _svc_list_uncategorized(call: ServiceCall) -> ServiceResponse:
-        entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
-        if entry is None:
-            return {"counterparties": []}
-        store: Store = entry.runtime_data.store
+        entries = _target_entries(hass, call.data.get("account_iban"))
+        merged: dict[str, dict[str, Any]] = {}
 
-        def _list() -> list[dict[str, Any]]:
+        def _list(store: Store) -> list[dict[str, Any]]:
             rows = store.conn.execute(
                 "SELECT counterparty, COUNT(*) AS n, SUM(ABS(amount)) AS total FROM transactions "
                 "WHERE category IS NULL AND status!='PDNG' AND counterparty IS NOT NULL "
-                "GROUP BY counterparty ORDER BY n DESC LIMIT ?", (call.data["limit"],)).fetchall()
-            return [{"counterparty": r["counterparty"], "count": r["n"], "total": round(r["total"] or 0, 2)} for r in rows]
+                "GROUP BY counterparty"
+            ).fetchall()
+            return [{"counterparty": r["counterparty"], "count": r["n"], "total": r["total"] or 0} for r in rows]
 
-        return {"counterparties": await hass.async_add_executor_job(_list)}
+        for entry in entries:
+            for item in await hass.async_add_executor_job(_list, entry.runtime_data.store):
+                bucket = merged.setdefault(item["counterparty"], {"counterparty": item["counterparty"], "count": 0, "total": 0.0})
+                bucket["count"] += item["count"]
+                bucket["total"] += item["total"]
+        result = sorted(merged.values(), key=lambda b: b["count"], reverse=True)[: call.data["limit"]]
+        for item in result:
+            item["total"] = round(item["total"], 2)
+        return {"counterparties": result}
 
     hass.services.async_register(DOMAIN, SVC_SYNC_NOW, _svc_sync_now, schema=SYNC_NOW_SCHEMA, supports_response=SupportsResponse.ONLY)
     hass.services.async_register(DOMAIN, SVC_GET_TRANSACTIONS, _svc_get_transactions, schema=GET_TRANSACTIONS_SCHEMA, supports_response=SupportsResponse.ONLY)
