@@ -31,12 +31,25 @@ class EnableBankingConnectionError(EnableBankingError):
 
 
 class EnableBankingApiError(EnableBankingError):
-    """The API answered with an HTTP error."""
+    """The API answered with an HTTP error.
+
+    Body format (confirmed from real error responses):
+    {"code": 429, "message": "...", "error": "ASPSP_RATE_LIMIT_EXCEEDED", "detail": {...}}
+    `code` here is the error code, not a class of error.
+    """
 
     def __init__(self, status: int, body: str) -> None:
         super().__init__(f"HTTP {status}: {body[:300]}")
         self.status = status
         self.body = body
+        self.error_code: str | None = None
+        self.detail: dict | None = None
+        try:
+            parsed = json.loads(body)
+            self.error_code = parsed.get("error")
+            self.detail = parsed.get("detail")
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
 
 def read_private_key(path: str) -> bytes:
@@ -77,8 +90,10 @@ class EnableBankingApi:
             self._jwt_expires_at = now + 3600
         return self._jwt
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        headers = {"Authorization": f"Bearer {self._get_jwt()}"}
+    async def _request(
+        self, method: str, path: str, psu_headers: dict[str, str] | None = None, **kwargs: Any
+    ) -> Any:
+        headers = {"Authorization": f"Bearer {self._get_jwt()}", **(psu_headers or {})}
         try:
             async with self._session.request(
                 method,
@@ -129,46 +144,50 @@ class EnableBankingApi:
     async def get_session(self, session_id: str) -> dict:
         return await self._request("GET", f"/sessions/{session_id}")
 
-    async def delete_session(self, session_id: str) -> dict:
-        return await self._request("DELETE", f"/sessions/{session_id}")
+    async def delete_session(self, session_id: str, psu_headers: dict[str, str] | None = None) -> dict:
+        return await self._request("DELETE", f"/sessions/{session_id}", psu_headers=psu_headers)
 
     # ---- account data
-    async def get_account_details(self, uid: str) -> dict:
-        return await self._request("GET", f"/accounts/{uid}/details")
+    async def get_account_details(self, uid: str, psu_headers: dict[str, str] | None = None) -> dict:
+        return await self._request("GET", f"/accounts/{uid}/details", psu_headers=psu_headers)
 
-    async def get_balances(self, uid: str) -> list[dict]:
-        data = await self._request("GET", f"/accounts/{uid}/balances")
+    async def get_balances(self, uid: str, psu_headers: dict[str, str] | None = None) -> list[dict]:
+        data = await self._request("GET", f"/accounts/{uid}/balances", psu_headers=psu_headers)
         return data.get("balances", [])
 
-    async def get_transactions(
+    async def get_transactions_page(
         self,
         uid: str,
         date_from: str | None = None,
         date_to: str | None = None,
-        max_pages: int = 5,
-    ) -> list[dict]:
-        """Fetch transactions, following `continuation_key` up to max_pages."""
+        continuation_key: str | None = None,
+        strategy: str | None = None,
+        transaction_status: str | None = None,
+        psu_headers: dict[str, str] | None = None,
+    ) -> dict:
+        """Fetch ONE page. Caller is responsible for following continuation_key.
+
+        A single page can legitimately be an empty transaction list together with a
+        continuation_key (per the API docs): that still means "call again".
+        """
         params: dict[str, str] = {}
         if date_from:
             params["date_from"] = date_from
         if date_to:
             params["date_to"] = date_to
-        transactions: list[dict] = []
-        continuation_key: str | None = None
-        for _ in range(max_pages):
-            page = dict(params)
-            if continuation_key:
-                page["continuation_key"] = continuation_key
-            data = await self._request(
-                "GET", f"/accounts/{uid}/transactions", params=page
-            )
-            transactions.extend(data.get("transactions", []))
-            continuation_key = data.get("continuation_key")
-            if not continuation_key:
-                break
-        return transactions
-
-    async def get_transaction_details(self, uid: str, transaction_id: str) -> dict:
+        if continuation_key:
+            params["continuation_key"] = continuation_key
+        if strategy:
+            params["strategy"] = strategy
+        if transaction_status:
+            params["transaction_status"] = transaction_status
         return await self._request(
-            "GET", f"/accounts/{uid}/transactions/{transaction_id}"
+            "GET", f"/accounts/{uid}/transactions", params=params, psu_headers=psu_headers
+        )
+
+    async def get_transaction_details(
+        self, uid: str, transaction_id: str, psu_headers: dict[str, str] | None = None
+    ) -> dict:
+        return await self._request(
+            "GET", f"/accounts/{uid}/transactions/{transaction_id}", psu_headers=psu_headers
         )

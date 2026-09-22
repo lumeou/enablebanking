@@ -1,4 +1,4 @@
-"""Sensors: one balance and one 'last transaction' per account."""
+"""Sensors: one balance and one 'last transaction' per account, read from local storage."""
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
@@ -18,7 +18,7 @@ from .coordinator import EnableBankingCoordinator
 def _to_decimal(amount: Any) -> Decimal | None:
     try:
         return Decimal(str(amount))
-    except (InvalidOperation, ValueError):
+    except (InvalidOperation, ValueError, TypeError):
         return None
 
 
@@ -41,12 +41,15 @@ async def async_setup_entry(
     for account in coordinator.accounts:
         entities.append(BalanceSensor(coordinator, account))
         entities.append(LastTransactionSensor(coordinator, account))
+        entities.append(TransactionCountSensor(coordinator, account))
     async_add_entities(entities)
 
 
 class EnableBankingEntity(CoordinatorEntity[EnableBankingCoordinator], SensorEntity):
     _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.MONETARY
+    # Backed by local storage: data survives bank outages / rate limits, so
+    # entities stay available even when the last bank sync failed.
+    _attr_available = True
 
     def __init__(self, coordinator: EnableBankingCoordinator, account: dict, key: str) -> None:
         super().__init__(coordinator)
@@ -62,11 +65,17 @@ class EnableBankingEntity(CoordinatorEntity[EnableBankingCoordinator], SensorEnt
         )
 
     @property
+    def available(self) -> bool:
+        return True  # local data, not tied to the last bank call's success
+
+    @property
     def _data(self) -> dict[str, Any]:
         return (self.coordinator.data or {}).get(self._hash, {})
 
 
 class BalanceSensor(EnableBankingEntity):
+    _attr_device_class = SensorDeviceClass.MONETARY
+
     def __init__(self, coordinator: EnableBankingCoordinator, account: dict) -> None:
         super().__init__(coordinator, account, "balance")
 
@@ -101,6 +110,7 @@ class BalanceSensor(EnableBankingEntity):
 
 
 class LastTransactionSensor(EnableBankingEntity):
+    _attr_device_class = SensorDeviceClass.MONETARY
     # Full transaction (names, IBANs...) is shown live but kept out of the history database.
     _unrecorded_attributes = frozenset({"transaction"})
 
@@ -108,13 +118,12 @@ class LastTransactionSensor(EnableBankingEntity):
         super().__init__(coordinator, account, "last_transaction")
 
     @property
-    def _latest(self) -> dict | None:
-        transactions = self._data.get("transactions") or []
-        return transactions[0] if transactions else None
+    def _tx(self) -> dict | None:
+        return self._data.get("last_transaction")
 
     @property
     def native_value(self) -> Decimal | None:
-        tx = self._latest
+        tx = self._tx
         if tx is None:
             return None
         value = _to_decimal((tx.get("transaction_amount") or {}).get("amount"))
@@ -124,16 +133,15 @@ class LastTransactionSensor(EnableBankingEntity):
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        tx = self._latest
+        tx = self._tx
         currency = ((tx or {}).get("transaction_amount") or {}).get("currency")
         return currency or self._account.get("currency") or None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        transactions = self._data.get("transactions") or []
-        tx = self._latest
+        tx = self._tx
         if tx is None:
-            return {"transactions_loaded": 0}
+            return {"transactions_loaded": self._data.get("transaction_count", 0)}
         outgoing = tx.get("credit_debit_indicator") == "DBIT"
         party = tx.get("creditor" if outgoing else "debtor") or {}
         return {
@@ -141,6 +149,25 @@ class LastTransactionSensor(EnableBankingEntity):
             "status": tx.get("status"),
             "counterparty": party.get("name"),
             "description": " | ".join(tx.get("remittance_information") or []),
-            "transactions_loaded": len(transactions),
+            "category": self._data.get("last_transaction_category"),
+            "transactions_loaded": self._data.get("transaction_count", 0),
             "transaction": tx,
         }
+
+
+class TransactionCountSensor(EnableBankingEntity):
+    _attr_state_class = "total"
+    _attr_native_unit_of_measurement = "transactions"
+    _attr_device_class = None
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: EnableBankingCoordinator, account: dict) -> None:
+        super().__init__(coordinator, account, "transaction_count")
+
+    @property
+    def native_value(self) -> int:
+        return self._data.get("transaction_count", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {"pending": self._data.get("pending_count", 0)}

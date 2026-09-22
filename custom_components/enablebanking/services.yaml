@@ -1,14 +1,61 @@
+sync_now:
+  fields:
+    force:
+      required: false
+      default: false
+      selector:
+        boolean:
+
 get_transactions:
   fields:
-    limit:
-      required: false
-      default: 50
-      selector:
-        number:
-          min: 1
-          max: 100
-          mode: box
-    iban:
-      required: false
-      selector:
-        text:
+    account_iban: {required: false, selector: {text: }}
+    date_from: {required: false, selector: {date: }}
+    date_to: {required: false, selector: {date: }}
+    direction: {required: false, selector: {select: {options: ["income", "expense"]}}}
+    min_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    max_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    text: {required: false, selector: {text: }}
+    category: {required: false, selector: {text: }}
+    include_pending: {required: false, default: false, selector: {boolean: }}
+    limit: {required: false, default: 50, selector: {number: {min: 1, max: 500, mode: box}}}
+    offset: {required: false, default: 0, selector: {number: {min: 0, mode: box}}}
+    order: {required: false, default: desc, selector: {select: {options: ["asc", "desc"]}}}
+
+get_summary:
+  fields:
+    account_iban: {required: false, selector: {text: }}
+    date_from: {required: false, selector: {date: }}
+    date_to: {required: false, selector: {date: }}
+    direction: {required: false, selector: {select: {options: ["income", "expense"]}}}
+    min_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    max_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    text: {required: false, selector: {text: }}
+    category: {required: false, selector: {text: }}
+    include_pending: {required: false, default: false, selector: {boolean: }}
+    group_by: {required: false, default: category, selector: {select: {options: ["category", "month", "account", "counterparty"]}}}
+
+export:
+  fields:
+    account_iban: {required: false, selector: {text: }}
+    date_from: {required: false, selector: {date: }}
+    date_to: {required: false, selector: {date: }}
+    direction: {required: false, selector: {select: {options: ["income", "expense"]}}}
+    min_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    max_amount: {required: false, selector: {number: {min: 0, step: 0.01, mode: box}}}
+    text: {required: false, selector: {text: }}
+    category: {required: false, selector: {text: }}
+    include_pending: {required: false, default: false, selector: {boolean: }}
+    format: {required: false, default: csv, selector: {select: {options: ["csv", "json"]}}}
+
+set_category:
+  fields:
+    transaction_id: {required: true, selector: {number: {mode: box}}}
+    category: {required: true, selector: {text: }}
+
+recategorize:
+  fields:
+    only_uncategorized: {required: false, default: true, selector: {boolean: }}
+
+list_uncategorized:
+  fields:
+    limit: {required: false, default: 20, selector: {number: {min: 1, max: 200, mode: box}}}

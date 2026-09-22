@@ -49,16 +49,19 @@
       "init": {
         "title": "Opciones de Enable Banking",
         "data": {
-          "scan_interval_hours": "Horas entre consultas",
-          "transaction_days": "Días de movimientos (0 = lo que decida el banco)"
+          "scan_interval_hours": "Horas entre consultas"
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "balance": {"name": "Saldo"},
-      "last_transaction": {"name": "Último movimiento"}
+      "balance": {
+        "name": "Saldo"
+      },
+      "last_transaction": {
+        "name": "Último movimiento"
+      }
     }
   },
   "services": {
@@ -66,9 +69,21 @@
       "name": "Obtener movimientos",
       "description": "Devuelve los movimientos y saldos guardados en la última actualización, con todos sus datos.",
       "fields": {
-        "limit": {"name": "Límite", "description": "Número máximo de movimientos por cuenta."},
-        "iban": {"name": "IBAN", "description": "Filtrar por una cuenta concreta (opcional)."}
+        "limit": {
+          "name": "Límite",
+          "description": "Número máximo de movimientos por cuenta."
+        },
+        "iban": {
+          "name": "IBAN",
+          "description": "Filtrar por una cuenta concreta (opcional)."
+        }
       }
+    }
+  },
+  "issues": {
+    "consent_expiring": {
+      "title": "La autorización de {title} caduca pronto",
+      "description": "El acceso concedido a Home Assistant para **{title}** caduca el {date}. Vuelve a autorizarlo desde Ajustes → Dispositivos y servicios antes de esa fecha para no perder la sincronización."
     }
   }
 }

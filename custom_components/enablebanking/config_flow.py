@@ -39,17 +39,17 @@ from .const import (
     CONF_REDIRECT_URL,
     CONF_SCAN_INTERVAL_HOURS,
     CONF_SESSION_ID,
-    CONF_TRANSACTION_DAYS,
     CONF_VALID_UNTIL,
     DATA_PENDING_STATES,
+    DATA_PSU_HEADERS,
     DEFAULT_ASPSP_COUNTRY,
     DEFAULT_ASPSP_NAME,
     DEFAULT_REDIRECT_BASE,
     DEFAULT_SCAN_INTERVAL_HOURS,
-    DEFAULT_TRANSACTION_DAYS,
     DOMAIN,
     FALLBACK_CONSENT_DAYS,
     MAX_CONSENT_DAYS,
+    MIN_SCAN_INTERVAL_HOURS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -280,11 +280,16 @@ class EnableBankingConfigFlow(ConfigFlow, domain=DOMAIN):
         if not accounts:
             return self.async_abort(reason="no_accounts")
 
+        psu_headers = None
+        if self._state:
+            psu_headers = self.hass.data.get(DOMAIN, {}).get(DATA_PSU_HEADERS, {}).pop(self._state, None)
+
         data = {
             **self._config,
             CONF_SESSION_ID: session["session_id"],
             CONF_ACCOUNTS: accounts,
             CONF_VALID_UNTIL: (session.get("access") or {}).get("valid_until"),
+            "psu_headers": psu_headers,
         }
         if self._reauth_entry is not None:
             return self.async_update_reload_and_abort(
@@ -330,11 +335,9 @@ class EnableBankingOptionsFlow(OptionsFlow):
                 vol.Required(
                     CONF_SCAN_INTERVAL_HOURS,
                     default=options.get(CONF_SCAN_INTERVAL_HOURS, DEFAULT_SCAN_INTERVAL_HOURS),
-                ): vol.All(vol.Coerce(int), vol.Range(min=1, max=48)),
-                vol.Required(
-                    CONF_TRANSACTION_DAYS,
-                    default=options.get(CONF_TRANSACTION_DAYS, DEFAULT_TRANSACTION_DAYS),
-                ): vol.All(vol.Coerce(int), vol.Range(min=0, max=730)),
+                # A shorter interval would not get more data anyway: the daily budget
+                # (a few automatic syncs a day) is what actually limits bank calls.
+                ): vol.All(vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL_HOURS, max=48)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

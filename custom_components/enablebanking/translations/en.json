@@ -49,16 +49,19 @@
       "init": {
         "title": "Enable Banking options",
         "data": {
-          "scan_interval_hours": "Hours between updates",
-          "transaction_days": "Days of transactions (0 = whatever the bank decides)"
+          "scan_interval_hours": "Hours between updates"
         }
       }
     }
   },
   "entity": {
     "sensor": {
-      "balance": {"name": "Balance"},
-      "last_transaction": {"name": "Last transaction"}
+      "balance": {
+        "name": "Balance"
+      },
+      "last_transaction": {
+        "name": "Last transaction"
+      }
     }
   },
   "services": {
@@ -66,9 +69,21 @@
       "name": "Get transactions",
       "description": "Returns the transactions and balances stored at the last update, with all their data.",
       "fields": {
-        "limit": {"name": "Limit", "description": "Maximum number of transactions per account."},
-        "iban": {"name": "IBAN", "description": "Filter by one account (optional)."}
+        "limit": {
+          "name": "Limit",
+          "description": "Maximum number of transactions per account."
+        },
+        "iban": {
+          "name": "IBAN",
+          "description": "Filter by one account (optional)."
+        }
       }
+    }
+  },
+  "issues": {
+    "consent_expiring": {
+      "title": "{title} authorisation expiring soon",
+      "description": "The access granted to Home Assistant for **{title}** expires on {date}. Re-authorise it from Settings → Devices & services before that date to keep syncing."
     }
   }
 }

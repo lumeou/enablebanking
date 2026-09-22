@@ -9,11 +9,19 @@ import html
 
 from aiohttp import web
 
+from homeassistant.util import dt as dt_util
+
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import UnknownFlow
 
-from .const import CALLBACK_PATH, DATA_PENDING_STATES, DATA_VIEW_REGISTERED, DOMAIN
+from .const import (
+    CALLBACK_PATH,
+    DATA_PENDING_STATES,
+    DATA_PSU_HEADERS,
+    DATA_VIEW_REGISTERED,
+    DOMAIN,
+)
 
 
 def _page(message: str, status: int = 200) -> web.Response:
@@ -44,10 +52,20 @@ class EnableBankingCallbackView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         query = request.query
         state = query.get("state", "")
-        pending: dict[str, str] = self.hass.data.get(DOMAIN, {}).get(
-            DATA_PENDING_STATES, {}
-        )
+        domain_data = self.hass.data.get(DOMAIN, {})
+        pending: dict[str, str] = domain_data.get(DATA_PENDING_STATES, {})
         flow_id = pending.pop(state, None) if state else None  # single use
+
+        # Best-effort PSU-presence signal for the *initial* transaction download (the API
+        # allows a longer history for a short window while the user is present). This is
+        # a proxy: the browser calling this HA endpoint, not calling the bank directly.
+        if state and flow_id is not None:
+            domain_data.setdefault(DATA_PSU_HEADERS, {})[state] = {
+                "Psu-Ip-Address": request.remote or "",
+                "Psu-User-Agent": request.headers.get("User-Agent", ""),
+                "Psu-Accept-Language": request.headers.get("Accept-Language", ""),
+                "captured_at": dt_util.utcnow().isoformat(),
+            }
         if flow_id is None:
             return _page(
                 "Enlace no válido o caducado. Vuelve a Home Assistant e inicia "
