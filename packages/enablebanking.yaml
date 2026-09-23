@@ -1,0 +1,122 @@
+# Paquete de Home Assistant para Enable Banking.
+#
+# Instalación (una sola vez, si todavía no usas paquetes):
+#   1. Copia este archivo a /config/packages/enablebanking.yaml
+#   2. En tu configuration.yaml, asegúrate de tener esto (si ya existe una
+#      clave "homeassistant:", añade solo la línea "packages: ..." dentro):
+#
+#        homeassistant:
+#          packages: !include_dir_named packages
+#
+#   3. Reinicia Home Assistant.
+#
+# Todo lo de aquí queda en este único archivo: para quitarlo basta con
+# borrarlo (o renombrarlo) y reiniciar; no deja nada suelto en configuration.yaml.
+#
+# Qué crea: seis sensores (mes actual, mes anterior, año actual, año
+# anterior, histórico, y la tendencia mensual del año en curso), cada uno con
+# income/expense/net/transaction_count/groups como atributos. Pensados para
+# consumirse desde Lovelace (ver la sección "Explotar los datos en Lovelace"
+# del README de la integración), no para mirarlos como número suelto.
+#
+# Para limitarte a un solo banco en cualquiera de las llamadas, añade
+# "account_iban: TU_IBAN" en el "data:" del servicio correspondiente.
+
+template:
+  - trigger:
+      - platform: time_pattern
+        minutes: "/15"
+      - platform: homeassistant
+        event: start
+      - platform: event
+        event_type: enablebanking_sync_finished
+    variables:
+      primer_dia_mes_actual: >-
+        {{ now().replace(day=1).strftime('%Y-%m-%d') }}
+      primer_dia_mes_anterior: >-
+        {{ (now().replace(day=1) - timedelta(days=1)).replace(day=1).strftime('%Y-%m-%d') }}
+      ultimo_dia_mes_anterior: >-
+        {{ (now().replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d') }}
+    action:
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ primer_dia_mes_actual }}"
+        response_variable: mes_actual
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ primer_dia_mes_anterior }}"
+          date_to: "{{ ultimo_dia_mes_anterior }}"
+        response_variable: mes_anterior
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ now().strftime('%Y-01-01') }}"
+        response_variable: anio_actual
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ (now().year - 1) }}-01-01"
+          date_to: "{{ (now().year - 1) }}-12-31"
+        response_variable: anio_anterior
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+        response_variable: historico
+      - service: enablebanking.get_summary
+        data:
+          group_by: month
+          date_from: "{{ now().strftime('%Y-01-01') }}"
+        response_variable: tendencia_mensual
+    sensor:
+      - name: "Enable Banking - Mes actual"
+        unique_id: enablebanking_resumen_mes_actual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ mes_actual.income }}"
+          expense: "{{ mes_actual.expense }}"
+          net: "{{ mes_actual.net }}"
+          transaction_count: "{{ mes_actual.transaction_count }}"
+          groups: "{{ mes_actual.groups | to_json }}"
+      - name: "Enable Banking - Mes anterior"
+        unique_id: enablebanking_resumen_mes_anterior
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ mes_anterior.income }}"
+          expense: "{{ mes_anterior.expense }}"
+          net: "{{ mes_anterior.net }}"
+          transaction_count: "{{ mes_anterior.transaction_count }}"
+          groups: "{{ mes_anterior.groups | to_json }}"
+      - name: "Enable Banking - Año actual"
+        unique_id: enablebanking_resumen_anio_actual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ anio_actual.income }}"
+          expense: "{{ anio_actual.expense }}"
+          net: "{{ anio_actual.net }}"
+          transaction_count: "{{ anio_actual.transaction_count }}"
+          groups: "{{ anio_actual.groups | to_json }}"
+      - name: "Enable Banking - Año anterior"
+        unique_id: enablebanking_resumen_anio_anterior
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ anio_anterior.income }}"
+          expense: "{{ anio_anterior.expense }}"
+          net: "{{ anio_anterior.net }}"
+          transaction_count: "{{ anio_anterior.transaction_count }}"
+          groups: "{{ anio_anterior.groups | to_json }}"
+      - name: "Enable Banking - Histórico"
+        unique_id: enablebanking_resumen_historico
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ historico.income }}"
+          expense: "{{ historico.expense }}"
+          net: "{{ historico.net }}"
+          transaction_count: "{{ historico.transaction_count }}"
+          groups: "{{ historico.groups | to_json }}"
+      - name: "Enable Banking - Tendencia mensual (año actual)"
+        unique_id: enablebanking_tendencia_mensual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          groups: "{{ tendencia_mensual.groups | to_json }}"

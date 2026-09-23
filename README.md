@@ -72,7 +72,25 @@ práctica: llamar al servicio dentro de la plantilla con `response_variable`, y
 usarlo como atributo de un sensor cuyo estado es solo la marca de tiempo de la
 última actualización.
 
-Pega esto en `configuration.yaml` (o en un paquete aparte) y reinicia:
+Esto **no se puede crear desde la interfaz** — los sensores de plantilla con
+`trigger:` solo existen en YAML a día de hoy; hay una petición abierta en la
+comunidad de Home Assistant pidiendo justo esa capacidad para el editor
+visual, sin resolver todavía. Para no mezclarlo con el resto de tu
+`configuration.yaml`, va como **paquete**: un archivo propio,
+`packages/enablebanking.yaml`, que puedes borrar entero el día que quieras
+quitarlo, sin dejar nada suelto. Si nunca has usado paquetes en tu instancia:
+
+1. Copia [`packages/enablebanking.yaml`](packages/enablebanking.yaml) (incluido junto a este README) a `/config/packages/enablebanking.yaml`.
+2. En tu `configuration.yaml`, asegúrate de tener esto (si ya existe una clave `homeassistant:`, añade solo la línea `packages: ...` dentro):
+   ```yaml
+   homeassistant:
+     packages: !include_dir_named packages
+   ```
+3. Reinicia Home Assistant.
+
+El archivo ya trae los seis sensores completos (los cinco periodos que
+pediste más la tendencia mensual). Aquí va su contenido, por si quieres
+entender o ajustar algo antes de copiarlo:
 
 ```yaml
 template:
@@ -84,20 +102,23 @@ template:
       - platform: event
         event_type: enablebanking_sync_finished
     variables:
-      primer_dia_mes_actual: "{{ now().replace(day=1) }}"
-      primer_dia_mes_anterior: "{{ (now().replace(day=1) - timedelta(days=1)).replace(day=1) }}"
-      ultimo_dia_mes_anterior: "{{ now().replace(day=1) - timedelta(days=1) }}"
+      primer_dia_mes_actual: >-
+        {{ now().replace(day=1).strftime('%Y-%m-%d') }}
+      primer_dia_mes_anterior: >-
+        {{ (now().replace(day=1) - timedelta(days=1)).replace(day=1).strftime('%Y-%m-%d') }}
+      ultimo_dia_mes_anterior: >-
+        {{ (now().replace(day=1) - timedelta(days=1)).strftime('%Y-%m-%d') }}
     action:
       - service: enablebanking.get_summary
         data:
           group_by: category
-          date_from: "{{ primer_dia_mes_actual.strftime('%Y-%m-%d') }}"
+          date_from: "{{ primer_dia_mes_actual }}"
         response_variable: mes_actual
       - service: enablebanking.get_summary
         data:
           group_by: category
-          date_from: "{{ primer_dia_mes_anterior.strftime('%Y-%m-%d') }}"
-          date_to: "{{ ultimo_dia_mes_anterior.strftime('%Y-%m-%d') }}"
+          date_from: "{{ primer_dia_mes_anterior }}"
+          date_to: "{{ ultimo_dia_mes_anterior }}"
         response_variable: mes_anterior
       - service: enablebanking.get_summary
         data:
@@ -351,6 +372,12 @@ señal de "usuario presente" en la primera descarga.
   como caducidad.
 
 ## Registro de cambios
+
+**v0.3.1**
+- El patrón de la sección "Explotar los datos en Lovelace" pasa de pegarse a
+  mano en `configuration.yaml` a un **paquete** propio
+  (`packages/enablebanking.yaml`, incluido en el ZIP), autocontenido y fácil
+  de quitar. Sin cambios en el componente Python.
 
 **v0.3.0**
 - Añadido `group_by: year` a `enablebanking.get_summary`, para comparativas
