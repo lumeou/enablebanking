@@ -44,7 +44,7 @@ class EnableBankingCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
         self.accounts: list[dict[str, Any]] = entry.data[CONF_ACCOUNTS]
         self.account_hashes = [a["identification_hash"] for a in self.accounts]
         self.setup_options = dict(entry.options)
-        self.engine = SyncEngine(hass, store, api, self.accounts)
+        self.engine = SyncEngine(hass, store, api, self.accounts, entry_id=entry.entry_id, bank_title=entry.title)
         self.psu_headers: dict[str, str] | None = None
 
     def _scan_interval(self) -> timedelta:
@@ -68,7 +68,11 @@ class EnableBankingCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]])
 
     async def _async_do_sync(self, reason: str) -> SyncResult:
         result = await self.engine.async_run(reason, psu_headers=self.psu_headers)
-        self.hass.bus.async_fire(EVENT_SYNC_FINISHED, {"status": result.status, "reason": reason})
+        self.hass.bus.async_fire(
+            EVENT_SYNC_FINISHED,
+            {"entry_id": self.config_entry.entry_id, "bank": self.config_entry.title,
+             "status": result.status, "reason": reason},
+        )
         if result.status == STATUS_AUTH_EXPIRED:
             self._maybe_warn_expiry(force=True)
             raise ConfigEntryAuthFailed("The bank authorisation has expired")

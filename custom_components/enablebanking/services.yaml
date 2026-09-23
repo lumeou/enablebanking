@@ -51,11 +51,14 @@ set_category:
   fields:
     transaction_id: {required: true, selector: {number: {mode: box}}}
     category: {required: true, selector: {text: }}
+    account_iban: {required: false, selector: {text: }}
 
 recategorize:
   fields:
     only_uncategorized: {required: false, default: true, selector: {boolean: }}
+    account_iban: {required: false, selector: {text: }}
 
 list_uncategorized:
   fields:
     limit: {required: false, default: 20, selector: {number: {min: 1, max: 200, mode: box}}}
+    account_iban: {required: false, selector: {text: }}

@@ -112,7 +112,10 @@ def _target_entries(hass: HomeAssistant, iban: str | None) -> list[ConfigEntry]:
         if any(a.get("iban", "").replace(" ", "").upper() == wanted for a in e.runtime_data.accounts)
     ]
     if not matching:
-        raise ServiceValidationError(f"No account matches IBAN {iban}")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="no_account_for_iban",
+            translation_placeholders={"iban": iban},
+        )
     return matching
 
 
@@ -155,6 +158,7 @@ async def _gather_rows(hass: HomeAssistant, call: ServiceCall) -> list[dict[str,
         rows, _total = await hass.async_add_executor_job(_query)
         for row in rows:
             row["bank"] = entry.title
+            row["bank_entry_id"] = entry.entry_id
         all_rows.extend(rows)
     return all_rows
 
@@ -172,7 +176,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         results = {}
         for entry in _loaded_entries(hass):
             coordinator: EnableBankingCoordinator = entry.runtime_data
-            results[entry.title] = await coordinator.async_request_sync(force=call.data["force"])
+            outcome = await coordinator.async_request_sync(force=call.data["force"])
+            results[entry.entry_id] = {"bank": entry.title, **outcome}
         return {"results": results}
 
     async def _svc_get_transactions(call: ServiceCall) -> ServiceResponse:
@@ -244,12 +249,15 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
             if await hass.async_add_executor_job(e.runtime_data.store.has_transaction_id, tx_id)
         ]
         if not matches:
-            raise ServiceValidationError(f"No transaction with id {tx_id}")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="transaction_not_found",
+                translation_placeholders={"transaction_id": str(tx_id)},
+            )
         if len(matches) > 1:
             names = ", ".join(e.title for e in matches)
             raise ServiceValidationError(
-                f"Transaction id {tx_id} exists in more than one bank ({names}); "
-                "pass account_iban to say which one"
+                translation_domain=DOMAIN, translation_key="transaction_ambiguous",
+                translation_placeholders={"transaction_id": str(tx_id), "banks": names},
             )
         store: Store = matches[0].runtime_data.store
 

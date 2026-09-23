@@ -1,45 +1,165 @@
-# Enable Banking para Home Assistant (v0.2)
+# Enable Banking para Home Assistant
 
-## Qué cambia respecto a v0.1
-Ahora la integración **solo consulta al banco lo justo** y guarda todo en una base de
-datos local (SQLite en `/config/enablebanking/<id>.db`). Sensores y servicios leen
-siempre de esa copia local, nunca del banco directamente.
+Integración personalizada, en desarrollo, para leer saldos y movimientos bancarios
+(vía [Enable Banking](https://enablebanking.com)) desde Home Assistant, con una
+base de datos local propia para auditar y categorizar los movimientos.
 
-- **Sincronización automática:** cada 6 horas (configurable, mínimo 6h), y como máximo
-  4 veces al día — el límite que suelen aplicar los bancos a las consultas sin ti
-  delante. Si el banco devuelve "demasiadas peticiones", se pausa varias horas sola.
-- **Primera descarga:** pide el histórico más largo posible (`strategy=longest`) justo
-  al terminar de vincular la cuenta, aprovechando la ventana en que el banco te
-  considera "presente".
-- **Si caduca la autorización:** los sensores siguen mostrando los últimos datos
-  guardados y Home Assistant te pide reautenticar (Ajustes → Dispositivos y servicios).
-- **Al eliminar la integración:** se cierra el consentimiento en el banco **y se borra
-  la base de datos local**. Para recuperar el histórico, vuelve a añadir la integración
-  y vincula la cuenta de nuevo.
+**Versión actual: 0.2.2.** Registro de cambios al final del documento.
+
+---
 
 ## Instalación
-Igual que en v0.1: copia `custom_components/enablebanking` a `/config/custom_components/`,
-la clave privada a `/config/enablebanking/private.key`, y registra en Enable Banking
-la URL `https://<tu-dominio-local>:8123/enablebanking/callback` (HTTPS obligatorio en
-producción). Reinicia Home Assistant y añade la integración.
 
-## Categorías
-Un archivo `/config/enablebanking/categories.yaml` (se crea automáticamente, con
-ejemplos) define reglas por texto o expresión regular. Edítalo y llama al servicio
-`enablebanking.recategorize` para aplicarlo. Las categorías puestas a mano con
-`enablebanking.set_category` nunca se sobrescriben por las reglas.
+1. **Clave privada** de tu aplicación de Enable Banking: cópiala a
+   `/config/enablebanking/private.key` en el servidor de Home Assistant.
+   **Nunca** en `/config/www` (esa carpeta es pública en `/local/`); el asistente
+   de configuración rechaza esa ruta.
+2. **Componente:** copia la carpeta `custom_components/enablebanking` a
+   `/config/custom_components/`.
+3. **URL de redirección** en el panel de Enable Banking: debe ser exactamente
+   `https://<tu-dominio-local>:8123/enablebanking/callback`. **HTTPS es
+   obligatorio** en aplicaciones de producción (el sandbox admite HTTP plano).
+   Home Assistant necesita entonces tener HTTPS activado (certificado autofirmado
+   vale, con resolución local por mDNS/`.local` o tu propio dominio).
+4. Reinicia Home Assistant.
+5. **Ajustes → Dispositivos y servicios → Añadir integración → Enable Banking.**
+   Se abre el login del banco; al terminar, la integración continúa sola (no hay
+   que copiar y pegar ninguna URL).
+6. Puedes repetir el proceso para añadir **varios bancos**, cada uno como una
+   integración independiente, con su propia aplicación de Enable Banking.
 
-## Servicios (Herramientas para desarrolladores → Acciones)
-- **`enablebanking.sync_now`** (`force`: bool) — fuerza una consulta al banco, saltándose
-  el calendario si `force: true` (pero no el bloqueo si el banco te ha limitado).
-- **`enablebanking.get_transactions`** — filtra por cuenta (IBAN), fechas, ingreso/gasto,
-  importe, texto y categoría, con paginación.
-- **`enablebanking.get_summary`** — totales de ingresos, gastos y neto, agrupados por
-  categoría, mes, cuenta o comercio.
-- **`enablebanking.export`** — CSV o JSON a `/config/enablebanking/exports/`.
-- **`enablebanking.set_category`** / **`enablebanking.recategorize`** /
-  **`enablebanking.list_uncategorized`** — categorización manual y por reglas.
+## Cómo funciona (arquitectura local-first)
 
-## Sensores por cuenta
-**Saldo**, **Último movimiento** (con categoría y datos completos como atributo) y
-**Número de movimientos** (desactivado por defecto, diagnóstico).
+```
+Banco → [motor de sincronización] → base de datos local (SQLite) → sensores · servicios · exportación · categorías
+```
+
+**Solo el motor de sincronización habla con el banco.** Sensores y servicios leen
+siempre de una copia local en `/config/enablebanking/<id_de_la_integración>.db`
+(un archivo por banco conectado). Esto existe porque los bancos limitan cuántas
+veces al día se les puede consultar sin que el usuario esté delante.
+
+- **Primera descarga:** al vincular la cuenta, pide el histórico más largo posible
+  (`strategy=longest`), aprovechando la ventana en que el banco te considera
+  "presente".
+- **Sincronizaciones siguientes:** incrementales, con 10 días de solapamiento
+  sobre el último movimiento guardado, para capturar apuntes tardíos o corregidos.
+- **Calendario:** cada 6 horas por defecto (configurable, mínimo 6h), con un tope
+  de 4 sincronizaciones reales al día — el límite habitual que aplican los bancos
+  a las consultas automáticas. El calendario y el tope se cuentan por separado
+  para cada banco conectado.
+- **Si el banco devuelve "demasiadas peticiones" (429):** se pausa varias horas
+  sola y se sigue sirviendo lo último guardado.
+- **Si caduca la autorización (401):** los sensores **no desaparecen** — siguen
+  mostrando los últimos datos guardados — y Home Assistant pide reautenticar
+  desde Ajustes → Dispositivos y servicios.
+- **Deduplicación:** usa `entry_reference` cuando el banco lo da y es único; si
+  no, una huella con fecha, importe, contraparte y saldo posterior. Los
+  movimientos pendientes (`PDNG`) se sustituyen en cada consulta, nunca se
+  acumulan.
+- **Al eliminar una integración:** se cierra el consentimiento en el banco **y se
+  borra su base de datos local**. Para recuperar el histórico, vuelve a añadir la
+  integración y vincula la cuenta de nuevo (consume una autorización, pero no
+  cuenta para el límite diario de consultas).
+
+## Sensores (por cada cuenta conectada)
+
+| Sensor | Qué muestra |
+|---|---|
+| **Saldo** | El saldo más significativo disponible (prioriza saldo disponible sobre contable), con todos los saldos como atributo. |
+| **Último movimiento** | Importe con signo, contraparte, concepto, categoría y el movimiento completo como atributo. |
+| **Número de movimientos** | Diagnóstico, desactivado por defecto. Total guardado y pendientes. |
+
+## Categorización
+
+- `/config/enablebanking/categories.yaml` se crea automáticamente con reglas de
+  ejemplo (Alimentación, Restauración, Transporte, Vivienda, Suministros, Ocio,
+  Salud, Nómina/Ingresos). Es un único archivo compartido por todos los bancos
+  conectados, porque las reglas no dependen del banco. Edítalo y ejecuta
+  `enablebanking.recategorize` para aplicarlo.
+- Las categorías puestas a mano con `enablebanking.set_category` **nunca** se
+  sobrescriben por las reglas, aunque vuelvas a ejecutar `recategorize`.
+
+## Servicios
+
+Todos aparecen en Herramientas para desarrolladores → Acciones, con nombre y
+descripción de cada campo en español o inglés según el idioma de tu Home
+Assistant. Los que consultan movimientos (`get_transactions`, `get_summary`,
+`export`) combinan automáticamente **todos los bancos conectados**, salvo que
+indiques `account_iban` para limitarte a uno.
+
+| Servicio | Qué hace |
+|---|---|
+| **`enablebanking.sync_now`** (`force`) | Fuerza una consulta a todos los bancos, saltándose el calendario si `force: true` (pero no un bloqueo activo por límite del banco). |
+| **`enablebanking.get_transactions`** | Movimientos filtrados por cuenta, fechas, ingreso/gasto, importe, texto, categoría, con paginación (`limit`/`offset`) y orden. |
+| **`enablebanking.get_summary`** | Totales de ingresos, gastos y neto, agrupados por categoría, mes, cuenta o contraparte. |
+| **`enablebanking.export`** | Escribe los movimientos filtrados en `/config/enablebanking/exports/`, en CSV o JSON. |
+| **`enablebanking.set_category`** | Asigna a mano la categoría de un movimiento (por su `id`, el que devuelve `get_transactions`). Si el mismo `id` numérico existe en dos bancos distintos, hay que indicar `account_iban` para desambiguar. |
+| **`enablebanking.recategorize`** | Aplica `categories.yaml` a los movimientos guardados, sin tocar los categorizados a mano. |
+| **`enablebanking.list_uncategorized`** | Contrapartes más frecuentes sin categoría, para ayudarte a ampliar `categories.yaml`. |
+
+## Eventos
+
+| Evento | Cuándo | Datos |
+|---|---|---|
+| **`enablebanking_new_transactions`** | Al terminar una sincronización que trajo movimientos nuevos. | `entry_id`, `bank`, `new_transactions`, `accounts` |
+| **`enablebanking_sync_finished`** | Al terminar cualquier sincronización (haya traído novedades o no). | `entry_id`, `bank`, `status`, `reason` |
+
+Ambos identifican de qué banco vienen (`entry_id`/`bank`), imprescindible si tienes
+más de una integración conectada.
+
+## Opciones (botón "Configurar" de cada integración)
+
+Horas entre consultas automáticas (6–48h, por defecto 6). El tope diario de 4
+consultas reales no es configurable desde la interfaz.
+
+## Parámetros no visibles en la interfaz
+
+Por diseño, algunos ajustes no se exponen como opción de usuario y solo se
+cambian editando `custom_components/enablebanking/const.py`: tope de consultas
+diarias, duración de los bloqueos tras un 429, días de solapamiento en la
+sincronización incremental, si se borra la base de datos al eliminar la
+integración (por defecto sí), y si se usan las cabeceras del navegador como
+señal de "usuario presente" en la primera descarga.
+
+## Limitaciones conocidas
+
+- No hay panel visual para navegar y categorizar movimientos; de momento la vía
+  es `get_transactions`/`get_summary` desde Herramientas para desarrolladores, o
+  Excel con `export`. Planeado para una versión futura.
+- No hay sensores mensuales de ingresos/gastos todavía (se calculan al vuelo con
+  `get_summary`, pero no como entidad).
+- El código de error exacto que cada banco usa para "sesión caducada" no está
+  confirmado más que para el formato general de Enable Banking
+  (`{"error": "..."}`); un 401 sin código reconocible se trata, por prudencia,
+  como caducidad.
+
+## Registro de cambios
+
+**v0.2.2**
+- Corregido: los servicios de auditoría (`get_transactions`, `get_summary`,
+  `export`, `set_category`, `recategorize`, `list_uncategorized`) solo miraban
+  la base de datos de la primera integración cargada; con más de un banco
+  conectado, devolvían resultados vacíos o del banco equivocado. Ahora combinan
+  todos los bancos y admiten `account_iban` para limitarse a uno.
+- Corregido: `enablebanking.sync_now` podía perder el resultado de un banco si
+  dos integraciones tenían el mismo nombre (mismo banco, dos aplicaciones). Ahora
+  se indexa por `entry_id`.
+- Corregido: los eventos `enablebanking_new_transactions` y
+  `enablebanking_sync_finished` no indicaban de qué banco venían.
+- Corregido/completado: traducciones de todos los servicios y de los mensajes de
+  error de validación (antes solo estaba traducido `get_transactions`, con un
+  campo obsoleto). Añadido `strings.json` como referencia.
+
+**v0.2.0 – v0.2.1**
+- Reescritura a arquitectura local-first: base de datos SQLite propia, motor de
+  sincronización independiente con calendario y tope diario de consultas,
+  gestión de errores 401/429, deduplicación de movimientos, categorización con
+  reglas YAML y corrección manual, servicios de auditoría y exportación.
+- URL de redirección con HTTPS para producción (documentado el porqué).
+
+**v0.1.0**
+- Primera versión: config flow con autenticación en el navegador (sin copiar y
+  pegar URLs), sensores de Saldo y Último movimiento por cuenta, servicio básico
+  `get_transactions` sin base de datos local (leía directo del banco en cada
+  sincronización), reautenticación automática al caducar el consentimiento.

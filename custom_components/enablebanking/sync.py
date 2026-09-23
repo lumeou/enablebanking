@@ -62,11 +62,16 @@ def _now_iso() -> str:
 
 
 class SyncEngine:
-    def __init__(self, hass: HomeAssistant, store: Store, api: EnableBankingApi, accounts: list[dict[str, Any]]) -> None:
+    def __init__(
+        self, hass: HomeAssistant, store: Store, api: EnableBankingApi, accounts: list[dict[str, Any]],
+        entry_id: str = "", bank_title: str = "",
+    ) -> None:
         self.hass = hass
         self.store = store
         self.api = api
         self.accounts = accounts  # [{"uid","identification_hash","title","iban","currency"}, ...]
+        self.entry_id = entry_id
+        self.bank_title = bank_title
 
     # ------------------------------------------------------------ scheduling
     async def async_is_due(self, scan_interval: timedelta, force: bool) -> tuple[bool, str]:
@@ -155,7 +160,12 @@ class SyncEngine:
         if new_total:
             self.hass.bus.async_fire(
                 EVENT_NEW_TRANSACTIONS,
-                {"new_transactions": new_total, "accounts": list(new_by_account.keys())},
+                {
+                    "entry_id": self.entry_id,
+                    "bank": self.bank_title,
+                    "new_transactions": new_total,
+                    "accounts": list(new_by_account.keys()),
+                },
             )
         return SyncResult(overall_status, accounts_done, new_total, updated_total, "", new_by_account)
 

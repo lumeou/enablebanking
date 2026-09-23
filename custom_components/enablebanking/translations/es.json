@@ -61,21 +61,212 @@
       },
       "last_transaction": {
         "name": "Último movimiento"
+      },
+      "transaction_count": {
+        "name": "Número de movimientos"
       }
     }
   },
   "services": {
+    "sync_now": {
+      "name": "Sincronizar ahora",
+      "description": "Consulta a todos los bancos conectados en este momento, sin esperar a la próxima sincronización programada.",
+      "fields": {
+        "force": {
+          "name": "Forzar",
+          "description": "Sincroniza aunque el límite diario o una pausa impuesta por el banco lo impedirían normalmente. Úsalo con moderación: consume parte del número limitado de consultas automáticas que el banco permite al día."
+        }
+      }
+    },
     "get_transactions": {
       "name": "Obtener movimientos",
-      "description": "Devuelve los movimientos y saldos guardados en la última actualización, con todos sus datos.",
+      "description": "Lee los movimientos de la base de datos local (nunca consulta al banco). Combina todos los bancos conectados salvo que se indique Cuenta (IBAN).",
+      "fields": {
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Limita a una cuenta. Si se omite, se aplica a todos los bancos conectados."
+        },
+        "date_from": {
+          "name": "Desde",
+          "description": "Solo movimientos en esta fecha o posteriores."
+        },
+        "date_to": {
+          "name": "Hasta",
+          "description": "Solo movimientos en esta fecha o anteriores."
+        },
+        "direction": {
+          "name": "Dirección",
+          "description": "Solo movimientos de entrada (ingreso) o de salida (gasto)."
+        },
+        "min_amount": {
+          "name": "Importe mínimo",
+          "description": "Solo movimientos de este importe o más (en valor absoluto)."
+        },
+        "max_amount": {
+          "name": "Importe máximo",
+          "description": "Solo movimientos de este importe o menos (en valor absoluto)."
+        },
+        "text": {
+          "name": "Texto de búsqueda",
+          "description": "Solo movimientos cuya contraparte, concepto o nota contenga este texto."
+        },
+        "category": {
+          "name": "Categoría",
+          "description": "Solo movimientos de esta categoría. Usa \"none\" para los que no tienen."
+        },
+        "include_pending": {
+          "name": "Incluir pendientes",
+          "description": "Incluye también movimientos que el banco aún no ha contabilizado. Se sustituyen en cada sincronización, así que su id no es estable."
+        },
+        "limit": {
+          "name": "Límite",
+          "description": "Número máximo de movimientos a devolver."
+        },
+        "offset": {
+          "name": "Desplazamiento",
+          "description": "Número de movimientos a saltar, para paginar los resultados."
+        },
+        "order": {
+          "name": "Orden",
+          "description": "Ordena por fecha, de más antiguo o de más reciente."
+        }
+      }
+    },
+    "get_summary": {
+      "name": "Obtener resumen",
+      "description": "Totaliza ingresos, gastos y neto a partir de la base de datos local, agrupados como se indique. Combina todos los bancos conectados salvo que se indique Cuenta (IBAN).",
+      "fields": {
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Limita a una cuenta. Si se omite, se aplica a todos los bancos conectados."
+        },
+        "date_from": {
+          "name": "Desde",
+          "description": "Solo movimientos en esta fecha o posteriores."
+        },
+        "date_to": {
+          "name": "Hasta",
+          "description": "Solo movimientos en esta fecha o anteriores."
+        },
+        "direction": {
+          "name": "Dirección",
+          "description": "Solo movimientos de entrada (ingreso) o de salida (gasto)."
+        },
+        "min_amount": {
+          "name": "Importe mínimo",
+          "description": "Solo movimientos de este importe o más (en valor absoluto)."
+        },
+        "max_amount": {
+          "name": "Importe máximo",
+          "description": "Solo movimientos de este importe o menos (en valor absoluto)."
+        },
+        "text": {
+          "name": "Texto de búsqueda",
+          "description": "Solo movimientos cuya contraparte, concepto o nota contenga este texto."
+        },
+        "category": {
+          "name": "Categoría",
+          "description": "Solo movimientos de esta categoría. Usa \"none\" para los que no tienen."
+        },
+        "include_pending": {
+          "name": "Incluir pendientes",
+          "description": "Incluye también movimientos que el banco aún no ha contabilizado. Se sustituyen en cada sincronización, así que su id no es estable."
+        },
+        "group_by": {
+          "name": "Agrupar por",
+          "description": "Cómo desglosar los totales."
+        }
+      }
+    },
+    "export": {
+      "name": "Exportar movimientos",
+      "description": "Guarda los movimientos que coincidan en un archivo dentro de /config/enablebanking/exports/, por ejemplo para abrirlo en Excel.",
+      "fields": {
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Limita a una cuenta. Si se omite, se aplica a todos los bancos conectados."
+        },
+        "date_from": {
+          "name": "Desde",
+          "description": "Solo movimientos en esta fecha o posteriores."
+        },
+        "date_to": {
+          "name": "Hasta",
+          "description": "Solo movimientos en esta fecha o anteriores."
+        },
+        "direction": {
+          "name": "Dirección",
+          "description": "Solo movimientos de entrada (ingreso) o de salida (gasto)."
+        },
+        "min_amount": {
+          "name": "Importe mínimo",
+          "description": "Solo movimientos de este importe o más (en valor absoluto)."
+        },
+        "max_amount": {
+          "name": "Importe máximo",
+          "description": "Solo movimientos de este importe o menos (en valor absoluto)."
+        },
+        "text": {
+          "name": "Texto de búsqueda",
+          "description": "Solo movimientos cuya contraparte, concepto o nota contenga este texto."
+        },
+        "category": {
+          "name": "Categoría",
+          "description": "Solo movimientos de esta categoría. Usa \"none\" para los que no tienen."
+        },
+        "include_pending": {
+          "name": "Incluir pendientes",
+          "description": "Incluye también movimientos que el banco aún no ha contabilizado. Se sustituyen en cada sincronización, así que su id no es estable."
+        },
+        "format": {
+          "name": "Formato",
+          "description": "Formato del archivo a generar."
+        }
+      }
+    },
+    "set_category": {
+      "name": "Asignar categoría",
+      "description": "Asigna a mano una categoría a un movimiento. Las categorías manuales nunca se sobrescriben con Recategorizar.",
+      "fields": {
+        "transaction_id": {
+          "name": "ID del movimiento",
+          "description": "El id del movimiento, tal como lo devuelve Obtener movimientos."
+        },
+        "category": {
+          "name": "Categoría",
+          "description": "La categoría a asignar."
+        },
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Solo hace falta si ese mismo id de movimiento existe en más de un banco conectado."
+        }
+      }
+    },
+    "recategorize": {
+      "name": "Recategorizar",
+      "description": "Aplica las reglas de categories.yaml a los movimientos guardados. Nunca toca los movimientos categorizados a mano.",
+      "fields": {
+        "only_uncategorized": {
+          "name": "Solo sin categoría",
+          "description": "Si se desactiva, vuelve a aplicar las reglas también a movimientos que ya tienen una categoría puesta por regla (útil tras editar categories.yaml)."
+        },
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Limita a una cuenta. Si se omite, se aplica a todos los bancos conectados."
+        }
+      }
+    },
+    "list_uncategorized": {
+      "name": "Listar contrapartes sin categoría",
+      "description": "Muestra qué contrapartes aparecen más veces sin categoría, para ayudarte a ampliar categories.yaml.",
       "fields": {
         "limit": {
           "name": "Límite",
-          "description": "Número máximo de movimientos por cuenta."
+          "description": "Número máximo de contrapartes a devolver."
         },
-        "iban": {
-          "name": "IBAN",
-          "description": "Filtrar por una cuenta concreta (opcional)."
+        "account_iban": {
+          "name": "Cuenta (IBAN)",
+          "description": "Limita a una cuenta. Si se omite, se aplica a todos los bancos conectados."
         }
       }
     }
@@ -84,6 +275,17 @@
     "consent_expiring": {
       "title": "La autorización de {title} caduca pronto",
       "description": "El acceso concedido a Home Assistant para **{title}** caduca el {date}. Vuelve a autorizarlo desde Ajustes → Dispositivos y servicios antes de esa fecha para no perder la sincronización."
+    }
+  },
+  "exceptions": {
+    "no_account_for_iban": {
+      "message": "Ninguna cuenta conectada coincide con el IBAN {iban}."
+    },
+    "transaction_not_found": {
+      "message": "No existe ningún movimiento con id {transaction_id}."
+    },
+    "transaction_ambiguous": {
+      "message": "El id de movimiento {transaction_id} existe en más de un banco conectado ({banks}). Indica account_iban para saber a cuál te refieres."
     }
   }
 }
