@@ -62,7 +62,219 @@ veces al día se les puede consultar sin que el usuario esté delante.
   integración y vincula la cuenta de nuevo (consume una autorización, pero no
   cuenta para el límite diario de consultas).
 
-## Sensores (por cada cuenta conectada)
+## Explotar los datos en Lovelace
+
+No hace falta ningún sensor adicional de Home Assistant para tablas, tartas o
+tendencias: los servicios ya devuelven justo lo necesario, y una plantilla
+disparada por evento (`template:` con `trigger:`) guarda ese resultado en un
+sensor propio que Lovelace puede leer. El patrón, aportado y verificado en la
+práctica: llamar al servicio dentro de la plantilla con `response_variable`, y
+usarlo como atributo de un sensor cuyo estado es solo la marca de tiempo de la
+última actualización.
+
+Pega esto en `configuration.yaml` (o en un paquete aparte) y reinicia:
+
+```yaml
+template:
+  - trigger:
+      - platform: time_pattern
+        minutes: "/15"
+      - platform: homeassistant
+        event: start
+      - platform: event
+        event_type: enablebanking_sync_finished
+    variables:
+      primer_dia_mes_actual: "{{ now().replace(day=1) }}"
+      primer_dia_mes_anterior: "{{ (now().replace(day=1) - timedelta(days=1)).replace(day=1) }}"
+      ultimo_dia_mes_anterior: "{{ now().replace(day=1) - timedelta(days=1) }}"
+    action:
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ primer_dia_mes_actual.strftime('%Y-%m-%d') }}"
+        response_variable: mes_actual
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ primer_dia_mes_anterior.strftime('%Y-%m-%d') }}"
+          date_to: "{{ ultimo_dia_mes_anterior.strftime('%Y-%m-%d') }}"
+        response_variable: mes_anterior
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ now().strftime('%Y-01-01') }}"
+        response_variable: anio_actual
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+          date_from: "{{ (now().year - 1) }}-01-01"
+          date_to: "{{ (now().year - 1) }}-12-31"
+        response_variable: anio_anterior
+      - service: enablebanking.get_summary
+        data:
+          group_by: category
+        response_variable: historico
+      - service: enablebanking.get_summary
+        data:
+          group_by: month
+          date_from: "{{ now().strftime('%Y-01-01') }}"
+        response_variable: tendencia_mensual
+    sensor:
+      - name: "Enable Banking - Mes actual"
+        unique_id: enablebanking_resumen_mes_actual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ mes_actual.income }}"
+          expense: "{{ mes_actual.expense }}"
+          net: "{{ mes_actual.net }}"
+          transaction_count: "{{ mes_actual.transaction_count }}"
+          groups: "{{ mes_actual.groups | to_json }}"
+      - name: "Enable Banking - Mes anterior"
+        unique_id: enablebanking_resumen_mes_anterior
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ mes_anterior.income }}"
+          expense: "{{ mes_anterior.expense }}"
+          net: "{{ mes_anterior.net }}"
+          transaction_count: "{{ mes_anterior.transaction_count }}"
+          groups: "{{ mes_anterior.groups | to_json }}"
+      - name: "Enable Banking - Año actual"
+        unique_id: enablebanking_resumen_anio_actual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ anio_actual.income }}"
+          expense: "{{ anio_actual.expense }}"
+          net: "{{ anio_actual.net }}"
+          transaction_count: "{{ anio_actual.transaction_count }}"
+          groups: "{{ anio_actual.groups | to_json }}"
+      - name: "Enable Banking - Año anterior"
+        unique_id: enablebanking_resumen_anio_anterior
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ anio_anterior.income }}"
+          expense: "{{ anio_anterior.expense }}"
+          net: "{{ anio_anterior.net }}"
+          transaction_count: "{{ anio_anterior.transaction_count }}"
+          groups: "{{ anio_anterior.groups | to_json }}"
+      - name: "Enable Banking - Histórico"
+        unique_id: enablebanking_resumen_historico
+        state: "{{ now().isoformat() }}"
+        attributes:
+          income: "{{ historico.income }}"
+          expense: "{{ historico.expense }}"
+          net: "{{ historico.net }}"
+          transaction_count: "{{ historico.transaction_count }}"
+          groups: "{{ historico.groups | to_json }}"
+      - name: "Enable Banking - Tendencia mensual (año actual)"
+        unique_id: enablebanking_tendencia_mensual
+        state: "{{ now().isoformat() }}"
+        attributes:
+          groups: "{{ tendencia_mensual.groups | to_json }}"
+```
+
+Para limitarte a un solo banco en cualquiera de estas llamadas, añade
+`account_iban: "TU_IBAN"` en el `data:` del servicio correspondiente.
+
+Desde `enablebanking.get_summary`, el diccionario `groups` que devuelve sale ya
+ordenado de forma útil: **cronológicamente** cuando agrupas por `month` o
+`year` (de más antiguo a más reciente), y **de mayor a menor gasto** cuando
+agrupas por `category`, `account` o `counterparty`. Esto importa porque las
+llamadas se hacen por separado a cada banco conectado y se combinan después:
+sin este orden, un gráfico podría salir con los meses o las categorías
+mezclados según qué banco respondiera primero.
+
+### Gráfico de tarta (gastos por categoría del mes actual)
+
+Con [`plotly-graph-card`](https://github.com/dbuezas/lovelace-plotly-graph-card)
+(HACS), que sabe generar tantas porciones como haga falta a partir de un
+atributo, sin declarar cada categoría a mano:
+
+```yaml
+type: custom:plotly-graph
+title: Gastos por categoría - mes actual
+entities:
+  - entity: sensor.enable_banking_mes_actual
+    type: pie
+    labels: |
+      $ex Object.entries(hass.states["sensor.enable_banking_mes_actual"]
+        ?.attributes?.groups || {})
+        .filter(([, v]) => v.expense < 0)
+        .map(([k]) => k)
+    values: |
+      $ex Object.entries(hass.states["sensor.enable_banking_mes_actual"]
+        ?.attributes?.groups || {})
+        .filter(([, v]) => v.expense < 0)
+        .map(([, v]) => Math.abs(v.expense))
+    textinfo: label+percent
+    textposition: inside
+    hovertemplate: |
+      <b>%{label}</b><br>
+      %{value:,.2f} €<br>
+      %{percent}<extra></extra>
+    sort: true
+hours_to_show: 1
+refresh_interval: auto
+layout:
+  height: 450
+  margin:
+    l: 10
+    r: 10
+    t: 20
+    b: 20
+  legend:
+    orientation: h
+    "y": -10
+```
+
+### Gráfico de barras (tendencia mensual)
+
+Mismo mecanismo, cambiando `pie` por `bar` y leyendo el sensor de tendencia
+mensual en vez del de un solo periodo:
+
+```yaml
+type: custom:plotly-graph
+title: Neto por mes (año actual)
+entities:
+  - entity: sensor.enable_banking_tendencia_mensual_ano_actual
+    type: bar
+    x: >
+      $ex
+      Object.keys(hass.states["sensor.enable_banking_tendencia_mensual_ano_actual"]
+        ?.attributes?.groups || {})
+    "y": >
+      $ex
+      Object.values(hass.states["sensor.enable_banking_tendencia_mensual_ano_actual"]
+        ?.attributes?.groups || {}).map(v => v.net)
+hours_to_show: 8760
+refresh_interval: auto
+```
+
+Para comparar años en vez de meses, duplica el bloque de `get_summary` en la
+plantilla con `group_by: year` y sin `date_from` (para tener todo el
+histórico repartido por año) y apunta el gráfico de barras a ese sensor.
+
+### Tabla
+
+Con [`flex-table-card`](https://github.com/custom-cards/flex-table-card)
+(HACS), o simplemente una tarjeta Markdown:
+
+```yaml
+type: markdown
+title: Gastos del mes actual por categoría
+content: >
+  | Categoría | Gasto |
+
+  |:---|--:|
+
+  {% for cat, datos in state_attr('sensor.enable_banking_mes_actual',
+  'groups').items() -%}
+
+  | {{ cat }} | {{ '%.2f'|format(datos.expense) }} € |
+
+  {% endfor %}
+```
+
+## Sensores por cuenta (nativos, siempre disponibles sin configuración extra)
 
 | Sensor | Qué muestra |
 |---|---|
@@ -92,7 +304,7 @@ indiques `account_iban` para limitarte a uno.
 |---|---|
 | **`enablebanking.sync_now`** (`force`) | Fuerza una consulta a todos los bancos, saltándose el calendario si `force: true` (pero no un bloqueo activo por límite del banco). |
 | **`enablebanking.get_transactions`** | Movimientos filtrados por cuenta, fechas, ingreso/gasto, importe, texto, categoría, con paginación (`limit`/`offset`) y orden. |
-| **`enablebanking.get_summary`** | Totales de ingresos, gastos y neto, agrupados por categoría, mes, cuenta o contraparte. |
+| **`enablebanking.get_summary`** | Totales de ingresos, gastos y neto, agrupados por categoría, mes, año, cuenta o contraparte. El orden de `groups` es cronológico para `month`/`year` y de mayor a menor gasto para el resto. |
 | **`enablebanking.export`** | Escribe los movimientos filtrados en `/config/enablebanking/exports/`, en CSV o JSON. |
 | **`enablebanking.set_category`** | Asigna a mano la categoría de un movimiento (por su `id`, el que devuelve `get_transactions`). Si el mismo `id` numérico existe en dos bancos distintos, hay que indicar `account_iban` para desambiguar. |
 | **`enablebanking.recategorize`** | Aplica `categories.yaml` a los movimientos guardados, sin tocar los categorizados a mano. |
@@ -127,14 +339,31 @@ señal de "usuario presente" en la primera descarga.
 - No hay panel visual para navegar y categorizar movimientos; de momento la vía
   es `get_transactions`/`get_summary` desde Herramientas para desarrolladores, o
   Excel con `export`. Planeado para una versión futura.
-- No hay sensores mensuales de ingresos/gastos todavía (se calculan al vuelo con
-  `get_summary`, pero no como entidad).
+- Deliberadamente **no hay sensores nativos de Home Assistant para totales por
+  periodo o desgloses por categoría**: se evaluaron (sensores en Python, uno por
+  banco y por periodo) y se descartaron a favor del patrón de plantilla +
+  servicio descrito en "Explotar los datos en Lovelace", que es más flexible
+  (cualquier rango de fechas, no solo unos pocos fijos) y no obliga a mantener
+  decenas de entidades.
 - El código de error exacto que cada banco usa para "sesión caducada" no está
   confirmado más que para el formato general de Enable Banking
   (`{"error": "..."}`); un 401 sin código reconocible se trata, por prudencia,
   como caducidad.
 
 ## Registro de cambios
+
+**v0.3.0**
+- Añadido `group_by: year` a `enablebanking.get_summary`, para comparativas
+  año a año sin tener que sumar doce llamadas agrupadas por mes.
+- Corregido: el diccionario `groups` que devuelve `get_summary` salía en un
+  orden arbitrario cuando combinaba varios bancos (dependía de cuál respondiera
+  antes). Ahora sale cronológico para `month`/`year` y de mayor a menor gasto
+  para el resto — importante para que un gráfico de barras o de tarta no salga
+  desordenado.
+- Evaluados y descartados los sensores nativos de periodo (mes/año actual y
+  anterior, histórico) en favor del patrón de plantilla disparada por evento +
+  `get_summary`, documentado a fondo en la nueva sección "Explotar los datos en
+  Lovelace", con ejemplos de tarta y barras con `plotly-graph-card` y de tabla.
 
 **v0.2.2**
 - Corregido: los servicios de auditoría (`get_transactions`, `get_summary`,

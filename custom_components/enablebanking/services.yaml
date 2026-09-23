@@ -32,7 +32,7 @@ get_summary:
     text: {required: false, selector: {text: }}
     category: {required: false, selector: {text: }}
     include_pending: {required: false, default: false, selector: {boolean: }}
-    group_by: {required: false, default: category, selector: {select: {options: ["category", "month", "account", "counterparty"]}}}
+    group_by: {required: false, default: category, selector: {select: {options: ["category", "month", "year", "account", "counterparty"]}}}
 
 export:
   fields:

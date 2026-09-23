@@ -72,7 +72,7 @@ GET_TRANSACTIONS_SCHEMA = vol.Schema({
 
 GET_SUMMARY_SCHEMA = vol.Schema({
     **TX_FILTER_SCHEMA,
-    vol.Optional("group_by", default="category"): vol.In(["category", "month", "account", "counterparty"]),
+    vol.Optional("group_by", default="category"): vol.In(["category", "month", "year", "account", "counterparty"]),
 })
 
 EXPORT_SCHEMA = vol.Schema({
@@ -201,6 +201,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 key = row["category"] or "Sin categoría"
             elif group_by == "month":
                 key = (row["booking_date"] or row["value_date"] or "")[:7] or "Sin fecha"
+            elif group_by == "year":
+                key = (row["booking_date"] or row["value_date"] or "")[:4] or "Sin fecha"
             elif group_by == "account":
                 key = f"{row['bank']} · {row['account_hash']}"
             else:
@@ -211,12 +213,22 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
                 bucket["income"] += amount
             else:
                 bucket["expense"] += amount
+        final_groups = {k: {"income": round(v["income"], 2), "expense": round(v["expense"], 2),
+                            "net": round(v["income"] + v["expense"], 2), "count": v["count"]}
+                        for k, v in groups.items()}
+        # Rows come from several banks merged in whatever order their databases returned
+        # them, so the dict above is NOT in a chart-friendly order on its own - fix that
+        # here rather than leaving it to whoever consumes the response (e.g. a Lovelace
+        # bar chart wants months left-to-right, a category breakdown wants the biggest
+        # slice first).
+        if group_by in ("month", "year"):
+            final_groups = dict(sorted(final_groups.items()))  # chronological, "Sin fecha" sorts last-ish
+        else:
+            final_groups = dict(sorted(final_groups.items(), key=lambda kv: kv[1]["expense"]))  # biggest expense first (most negative)
         return {
             "income": round(income, 2), "expense": round(expense, 2), "net": round(income + expense, 2),
             "transaction_count": len(rows),
-            "groups": {k: {"income": round(v["income"], 2), "expense": round(v["expense"], 2),
-                          "net": round(v["income"] + v["expense"], 2), "count": v["count"]}
-                      for k, v in groups.items()},
+            "groups": final_groups,
         }
 
     async def _svc_export(call: ServiceCall) -> ServiceResponse:
@@ -397,7 +409,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Close the bank consent (best effort) and delete the local database."""
+    """Close the bank consent (best effort), delete the local database, and hand the
+    combined ("all banks") sensors over to another bank if this one owned them.
+    """
     try:
         key = await hass.async_add_executor_job(read_private_key, entry.data[CONF_PRIVATE_KEY_PATH])
         api = EnableBankingApi(async_get_clientsession(hass), entry.data[CONF_APPLICATION_ID], key)
@@ -406,3 +420,4 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         _LOGGER.debug("Could not delete the bank session: %s", err)
     if DELETE_DB_ON_REMOVE:
         await hass.async_add_executor_job(Store.delete_files, _db_path(hass, entry))
+
