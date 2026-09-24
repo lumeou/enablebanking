@@ -45,6 +45,14 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+def _format_iban(iban: str | None) -> str | None:
+    """ES12 3456 7890 12 3456789012 - spaced every 4 chars, matches how banks print it."""
+    if not iban:
+        return None
+    compact = iban.replace(" ", "")
+    return " ".join(compact[i : i + 4] for i in range(0, len(compact), 4))
+
+
 class EnableBankingEntity(CoordinatorEntity[EnableBankingCoordinator], SensorEntity):
     _attr_has_entity_name = True
     # Backed by local storage: data survives bank outages / rate limits, so
@@ -57,11 +65,18 @@ class EnableBankingEntity(CoordinatorEntity[EnableBankingCoordinator], SensorEnt
         self._hash = account["identification_hash"]  # stable across re-logins
         self._attr_unique_id = f"{self._hash}_{key}"
         self._attr_translation_key = key
+        # iban = _format_iban(account.get("iban"))
+        iban = account.get("iban")
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._hash)},
             name=account["title"],
             manufacturer=coordinator.config_entry.data[CONF_ASPSP_NAME],
-            model="Bank account",
+            # Shown as "<model> por <manufacturer>" on the device page, and as the
+            # subtitle under the device name on the integration's device list - the
+            # two places the IBAN needs to be visible "at a glance" without opening
+            # anything further.
+            model=f"Cuenta · {iban}" if iban else "Cuenta bancaria",
+            serial_number=iban,
         )
 
     @property

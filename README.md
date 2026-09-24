@@ -4,7 +4,7 @@ Integración personalizada, en desarrollo, para leer saldos y movimientos bancar
 (vía [Enable Banking](https://enablebanking.com)) desde Home Assistant, con una
 base de datos local propia para auditar y categorizar los movimientos.
 
-**Versión actual: 0.2.2.** Registro de cambios al final del documento.
+**Versión actual: 0.3.3.** Registro de cambios al final del documento.
 
 ---
 
@@ -372,6 +372,29 @@ señal de "usuario presente" en la primera descarga.
   como caducidad.
 
 ## Registro de cambios
+
+**v0.3.3**
+- El IBAN de cada cuenta ahora se ve de un vistazo: aparece como "Modelo"
+  (la línea bajo el nombre del dispositivo, tanto en la lista de dispositivos
+  de la integración como al abrir la ficha del dispositivo) y también en el
+  campo "Número de serie" de esa ficha.
+
+**v0.3.2**
+- Corregido: la plantilla del paquete llamaba a `.strftime()` sobre variables
+  que ya habían pasado por `variables:`, y Home Assistant las convierte a
+  texto en ese paso — provocaba `UndefinedError: 'str object' has no
+  attribute 'strftime'`. El formateo se hace ahora dentro de la propia
+  variable, de una sola vez.
+- Corregido: los ejemplos de Lovelace de la sección "Explotar los datos en
+  Lovelace" apuntaban a `sensor.enablebanking_resumen_mes_actual` y
+  `sensor.enablebanking_tendencia_mensual`, que no son los `entity_id` reales
+  (Home Assistant los genera a partir de `name:`, no de `unique_id`). Los
+  ejemplos habrían mostrado tarjetas en blanco. Corregidos a
+  `sensor.enable_banking_mes_actual` y
+  `sensor.enable_banking_tendencia_mensual_ano_actual`.
+- Ampliadas las reglas de categorización por defecto (`categories.py`): de 8 a
+  13 categorías, con más palabras clave por categoría, y cuatro categorías
+  nuevas (Compras, Hogar, Educación, Seguros, Finanzas).
 
 **v0.3.1**
 - El patrón de la sección "Explotar los datos en Lovelace" pasa de pegarse a
