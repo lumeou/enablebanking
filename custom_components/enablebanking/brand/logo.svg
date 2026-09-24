@@ -1,0 +1,13 @@
+<svg fill="none" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect x="24" y="24" width="12" height="12" stroke="white" stroke-width="6px">
+    <animate attributeName="x" values="27;25;27" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="width" values="11;13;11" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="y" values="27;25;27" dur="2s" repeatCount="indefinite"/>
+    <animate attributeName="height" values="11;13;11" dur="2s" repeatCount="indefinite"/>
+  </rect>
+  <path stroke="white" stroke-width="6px" d="       M3 3       L20 20       M44 44       L61 61       M61 3       L44 20       M20 44       L3 61       Z       "/>
+  <circle cx="0" cy="0" r="3" stroke="white" stroke-width="6px">
+    <animate attributeName="r" values="1;6;1" dur="1.5s" repeatCount="indefinite"/>
+    <animateMotion dur="6s" repeatCount="indefinite" path="       M6 6       L16 16       M48 48       L56 56       M56 8       L48 16       M16 48       L8 56       M6 6       Z       "/>
+  </circle>
+</svg>
