@@ -4,7 +4,7 @@ Integración personalizada, en desarrollo, para leer saldos y movimientos bancar
 (vía [Enable Banking](https://enablebanking.com)) desde Home Assistant, con una
 base de datos local propia para auditar y categorizar los movimientos.
 
-**Versión actual: 0.3.3.** Registro de cambios al final del documento.
+**Versión actual: 0.4.0.** Registro de cambios al final del documento.
 
 ---
 
@@ -373,11 +373,25 @@ señal de "usuario presente" en la primera descarga.
 
 ## Registro de cambios
 
+**v0.4.0**
+- Corregido: los movimientos nuevos no se categorizaban solos al descargarse.
+  `categories.yaml` solo se aplicaba cuando se llamaba a mano al servicio
+  `enablebanking.recategorize`; todo lo que entraba por sincronización
+  automática se quedaba sin categoría hasta ese momento. Ahora cada
+  movimiento se categoriza por reglas en el mismo instante en que se guarda
+  por primera vez (incluida la descarga inicial completa al vincular una
+  cuenta), sin tocar para nada los movimientos que ya tuvieran categoría
+  puesta a mano o por una sincronización anterior. `recategorize` sigue
+  existiendo, para volver a aplicar las reglas tras editar
+  `categories.yaml` o para el histórico que ya tenías de antes de esta
+  versión.
+
 **v0.3.3**
 - El IBAN de cada cuenta ahora se ve de un vistazo: aparece como "Modelo"
   (la línea bajo el nombre del dispositivo, tanto en la lista de dispositivos
   de la integración como al abrir la ficha del dispositivo) y también en el
-  campo "Número de serie" de esa ficha.
+  campo "Número de serie" de esa ficha, con espacios cada 4 caracteres para
+  que se lea como lo imprime el propio banco.
 
 **v0.3.2**
 - Corregido: la plantilla del paquete llamaba a `.strftime()` sobre variables

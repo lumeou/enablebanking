@@ -15,8 +15,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from .api import EnableBankingApi, EnableBankingApiError, EnableBankingConnectionError, EnableBankingKeyError
+from .categories import ensure_rules_file, load_rules
 from .const import (
     DAILY_SYNC_BUDGET,
+    DB_DIR,
     EVENT_NEW_TRANSACTIONS,
     GENERIC_429_BLOCK,
     MAX_TX_PAGES,
@@ -112,6 +114,13 @@ class SyncEngine:
 
         try:
             initial_needed = set(await self.hass.async_add_executor_job(self.store.accounts_needing_initial))
+            # Loaded once per run, not per account/page: categories.yaml is shared
+            # across every connected bank, and a new transaction gets categorized
+            # right at insert time (see Store.upsert_transactions) - no separate
+            # "recategorize" step needed for newly downloaded transactions.
+            rules_path = self.hass.config.path(DB_DIR, "categories.yaml")
+            await self.hass.async_add_executor_job(ensure_rules_file, rules_path)
+            rules = await self.hass.async_add_executor_job(load_rules, rules_path)
             for account in self.accounts:
                 acc_hash, uid = account["identification_hash"], account["uid"]
                 is_initial = acc_hash in initial_needed
@@ -128,7 +137,7 @@ class SyncEngine:
                         self.store.add_balances, acc_hash, balances, now
                     )
 
-                    new_rows, upd = await self._sync_transactions(acc_hash, uid, is_initial, headers)
+                    new_rows, upd = await self._sync_transactions(acc_hash, uid, is_initial, headers, rules)
                     api_calls += 1  # at least one call was made (page counting happens inside)
                     if new_rows:
                         new_by_account[acc_hash] = new_rows
@@ -170,7 +179,8 @@ class SyncEngine:
         return SyncResult(overall_status, accounts_done, new_total, updated_total, "", new_by_account)
 
     async def _sync_transactions(
-        self, acc_hash: str, uid: str, is_initial: bool, headers: dict[str, str] | None
+        self, acc_hash: str, uid: str, is_initial: bool, headers: dict[str, str] | None,
+        rules: list[dict[str, Any]],
     ) -> tuple[list[dict[str, Any]], int]:
         if is_initial:
             date_from, strategy = None, "longest"
@@ -203,7 +213,7 @@ class SyncEngine:
             _LOGGER.warning("Enable Banking: reached the %s-page safety limit for one account", MAX_TX_PAGES)
 
         result = await self.hass.async_add_executor_job(
-            self.store.upsert_transactions, acc_hash, all_tx, _now_iso()
+            self.store.upsert_transactions, acc_hash, all_tx, _now_iso(), rules
         )
         return result["new"], result["updated"]
 

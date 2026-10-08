@@ -14,6 +14,8 @@ import threading
 from collections import Counter
 from typing import Any
 
+from .categories import match_category
+
 _LOGGER = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
@@ -236,8 +238,19 @@ class Store:
         return [json.loads(r["raw_json"]) for r in rows]
 
     # --------------------------------------------------------- transactions
-    def upsert_transactions(self, account_hash: str, txs: list[dict[str, Any]], now: str) -> dict[str, Any]:
-        """Insert/update; returns {"new": [normalized booked rows], "updated": n, "unchanged": n}."""
+    def upsert_transactions(
+        self, account_hash: str, txs: list[dict[str, Any]], now: str,
+        rules: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Insert/update; returns {"new": [normalized booked rows], "updated": n, "unchanged": n}.
+
+        `rules` (from categories.py's load_rules), when given, are matched against
+        every row and included in the INSERT - but only take effect for rows that
+        are genuinely new. For a row that already exists, the ON CONFLICT clause
+        below does not touch category/category_source, so whatever category was
+        there before (set by a rule on an earlier sync, or by hand) is left alone;
+        the computed value for that row is simply discarded by SQLite.
+        """
         norm = [normalize_transaction(t) for t in txs]
         ref_counts = Counter(n["entry_reference"] for n in norm
                              if n["entry_reference"] and n["status"] != "PDNG")
@@ -253,6 +266,9 @@ class Store:
             else:  # no (or duplicated) reference: content fingerprint + occurrence number
                 seen[fp] += 1
                 n["dedup_key"] = f"fp:{fp}#{seen[fp]}"
+            category = match_category(rules, n["counterparty"], n["remittance"], n["mcc"]) if rules else None
+            n["category"] = category
+            n["category_source"] = "rule" if category else None
             rows.append(n)
 
         new_rows: list[dict[str, Any]] = []
@@ -275,11 +291,13 @@ class Store:
                     """INSERT INTO transactions (account_hash, dedup_key, entry_reference, status, booking_date,
                         value_date, transaction_date, effective_date, amount, amount_text, currency, indicator,
                         counterparty, counterparty_iban, remittance, note, mcc, bank_code, bank_code_desc,
-                        balance_after, reference_number, raw_json, content_hash, first_seen, last_seen)
+                        balance_after, reference_number, raw_json, content_hash, category, category_source,
+                        first_seen, last_seen)
                        VALUES (:account_hash, :dedup_key, :entry_reference, :status, :booking_date, :value_date,
                         :transaction_date, :effective_date, :amount, :amount_text, :currency, :indicator,
                         :counterparty, :counterparty_iban, :remittance, :note, :mcc, :bank_code, :bank_code_desc,
-                        :balance_after, :reference_number, :raw_json, :content_hash, :now, :now)
+                        :balance_after, :reference_number, :raw_json, :content_hash, :category, :category_source,
+                        :now, :now)
                        ON CONFLICT(account_hash, dedup_key) DO UPDATE SET
                         status=excluded.status, booking_date=excluded.booking_date, value_date=excluded.value_date,
                         transaction_date=excluded.transaction_date, effective_date=excluded.effective_date,
