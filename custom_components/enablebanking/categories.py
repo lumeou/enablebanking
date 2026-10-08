@@ -25,7 +25,7 @@ rules:
   - category: Alimentación
     contains: ["mercadona", "lidl", "carrefour", "dia", "aldi", "eroski", "froiz", "hipercor", "supermercado", "supermercados"]
   - category: Restauración
-    contains: ["restaurante", "cafeteria", "cafetería", "bar ", "meson", "cafe-bar"]
+    contains: ["restaurante", "cafeteria", "cafetería", "bar ", "meson", "cafe-bar", "heladeria", "heladería", "pasteleria", "pastelería"]
   - category: Transporte
     contains: ["renfe", "metro", "emt", "uber", "cabify", "gasolinera", "repsol", "cepsa", "parking", "aparcamiento"]
   - category: Vivienda
@@ -34,20 +34,28 @@ rules:
     contains: ["endesa", "iberdrola", "naturgy", "movistar", "vodafone", "orange", "virgin mobile"]
   - category: Ocio
     contains: ["netflix", "spotify", "cine", "hbo", "disney+", "prime video"]
+  - category: Deporte
+    contains: ["gimnasio", "gym", "piscina", "natacion", "natación"]
   - category: Salud
     contains: ["farmacia", "clinica", "clínica", "seguro medico", "seguro médico"]
   - category: Compras
     contains: ["amazon", "wallapop"]
   - category: Hogar
-    contains: ["leroy merlin", "bricodepot", "bricomart", "brico depot"]
+    contains: ["ferreteria", "ferretería", "leroy merlin", "bricodepot", "bricomart"]
   - category: Educación
-    contains: ["colegio", "academia", "universidad", "escuela"]
+    contains: ["colegio", "academia", "universidad", "escuela", "libreria", "librería"]
   - category: Seguros
     contains: ["seguro", "aseguradora"]
-  - category: Finanzas
-    contains: ["prestamo", "tarjetas de credito", "liquidacion"]
+  - category: Impuestos
+    contains: []
   - category: Nómina/Ingresos
-    contains: ["nomina", "nómina", "transferencia"]
+    contains: ["nomina", "nómina"]
+  - category: Transferencias
+    contains: ["traspaso", "transferencia", "bizum"]
+  - category: Efectivo
+    contains: ["reintegro"]
+  - category: Finanzas
+    contains: ["prestamo", "liquidacion"]
 """
 
 
