@@ -23,37 +23,45 @@ DEFAULT_RULES = """\
 # Las reglas se prueban en orden; gana la primera que coincida.
 rules:
   - category: Alimentación
-    contains: ["mercadona", "lidl", "carrefour", "dia", "aldi", "eroski", "froiz", "hipercor", "supermercado", "supermercados"]
+    contains: ["mercadona", "lidl", "carrefour", "dia", "aldi", "eroski", "froiz", "gadis", "hipercor", "supermercado", "supermercados", "ultramarinos", "panaderia", "panadería", "carniceria", "carnicería", "fruteria", "frutería", "pasteleria", "pastelería"]
   - category: Restauración
-    contains: ["restaurante", "cafeteria", "cafetería", "bar ", "meson", "cafe-bar", "heladeria", "heladería", "pasteleria", "pastelería"]
+    contains: ["restaurante", "asador", "cafeteria", "cafetería", "meson", "cafe ", "bar ", "cafe-bar", "bodega", "comedor", "taberna", "taperia", "tapería", "heladeria", "heladería", "chocolateria", "chocolatería", "parrillada", "pizzeria", "pizzería"]
   - category: Transporte
-    contains: ["renfe", "metro", "emt", "uber", "cabify", "gasolinera", "repsol", "cepsa", "parking", "aparcamiento"]
+    contains: ["renfe", "metro", "emt", "uber", "cabify", "gasolinera", "repsol", "cepsa", "parking", "aparcamiento", "estacionamiento"]
+  - category: Vehículo
+    contains: ["taller", "mecanico", "mecánico", "neumaticos", "neumáticos", "itv"]
+  - category: Alojamiento
+    contains: ["hotel", "hostal", "camping", "albergue", "residencia", "apartamento turistico", "apartamento turístico"]
   - category: Vivienda
     contains: ["alquiler", "hipoteca", "comunidad de propietarios"]
   - category: Suministros
     contains: ["endesa", "iberdrola", "naturgy", "movistar", "vodafone", "orange", "virgin mobile"]
   - category: Ocio
-    contains: ["netflix", "spotify", "cine", "hbo", "disney+", "prime video"]
+    contains: ["netflix", "spotify", "cine", "hbo", "disney+", "prime video", "playstation", "nintendo", "steam"]
   - category: Deporte
     contains: ["gimnasio", "gym", "piscina", "natacion", "natación"]
   - category: Salud
-    contains: ["farmacia", "clinica", "clínica", "seguro medico", "seguro médico"]
+    contains: ["farmacia", "clinica", "clínica", "seguro medico", "seguro médico", "fisio"]
+  - category: Ropa y calzado
+    contains: ["adidas", "nike", "decathlon", "zara", "primark"]
+  - category: Belleza
+    contains: ["peluqueria", "peluquería", "estetica", "estética", "cosmetica", "cosmética"]
   - category: Compras
-    contains: ["amazon", "wallapop"]
+    contains: ["amazon", "wallapop", "aliexpress", "amzn mktp", "corte ingles"]
   - category: Hogar
-    contains: ["ferreteria", "ferretería", "leroy merlin", "bricodepot", "bricomart"]
+    contains: ["ferreteria", "ferretería", "ikea", "leroy merlin", "bricodepot", "bricomart"]
   - category: Educación
-    contains: ["colegio", "academia", "universidad", "escuela", "libreria", "librería"]
+    contains: ["colegio", "academia", "universidad", "escuela", "libreria", "librería", "libros", "academy"]
   - category: Seguros
     contains: ["seguro", "aseguradora"]
   - category: Impuestos
-    contains: []
+    contains: ["ayuntamiento", "diputacion", "diputación", "hacienda", "tributos", "ivtm"]
   - category: Nómina/Ingresos
     contains: ["nomina", "nómina"]
   - category: Transferencias
-    contains: ["traspaso", "transferencia", "bizum"]
+    contains: ["traspaso", "transferencia", "bizum", "tarjeta prepago"]
   - category: Efectivo
-    contains: ["reintegro"]
+    contains: ["reintegro", "retirada de efectivo"]
   - category: Finanzas
     contains: ["prestamo", "liquidacion"]
 """
