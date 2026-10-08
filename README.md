@@ -4,7 +4,7 @@ Integración personalizada, en desarrollo, para leer saldos y movimientos bancar
 (vía [Enable Banking](https://enablebanking.com)) desde Home Assistant, con una
 base de datos local propia para auditar y categorizar los movimientos.
 
-**Versión actual: 0.4.0.** Registro de cambios al final del documento.
+**Versión actual: 0.4.1.** Registro de cambios al final del documento.
 
 ---
 
@@ -372,6 +372,43 @@ señal de "usuario presente" en la primera descarga.
   como caducidad.
 
 ## Registro de cambios
+
+**v0.4.1**
+- Corregido: movimientos duplicados en la base de datos local. La causa era
+  que la deduplicación usaba como identificador principal `entry_reference` (o
+  campos similares) tal cual los reporta el banco; algunos bancos (confirmado
+  con un caso real) lo devuelven a `null` en la sincronización en la que el
+  movimiento aparece por primera vez y lo rellenan días después para ese
+  **mismo** movimiento. Al cambiar de `null` a un valor, el esquema de
+  deduplicación "saltaba" a una clave distinta y el movimiento se insertaba
+  por segunda vez en lugar de actualizarse.
+  - Nueva huella de contenido (`fingerprint`) para reconocer que dos filas son
+    el mismo movimiento real, calculada sobre fecha efectiva, importe
+    normalizado (`"6"`, `"6.00"` y `6` producen la misma huella), moneda,
+    signo (cargo/abono), contraparte, IBAN de la contraparte y concepto
+    (`remittance`) normalizados (espacios colapsados, sin distinguir
+    mayúsculas/minúsculas). Deliberadamente **no** incluye `balance_after`
+    (puede faltar o variar entre consultas) ni las tres fechas en bruto
+    (`booking_date`/`value_date`/`transaction_date`), sustituidas por la
+    fecha efectiva ya resuelta.
+  - Mecanismo de "promoción": si una fila ya guardada con clave de huella
+    (`fp:...`) coincide en huella con un movimiento que llega después con
+    `entry_reference` (o `reference_number`) ya informado, se reutiliza la
+    clave de esa fila existente en lugar de crear una nueva; el `UPSERT`
+    actualiza esa misma fila y rellena el identificador que llegó tarde, sin
+    duplicar nada ni tocar la categoría que ya tuviera.
+  - Migración de esquema (v1 → v2): añade la columna `fingerprint` y calcula
+    su valor para todos los movimientos ya almacenados a partir de sus
+    columnas existentes, de forma automática al actualizar la integración;
+    no requiere ninguna acción manual ni pierde histórico.
+  - Añadido, por el mismo motivo, `reference_number` como segundo
+    identificador fuerte (igual que `entry_reference`) para bancos que usen
+    ese campo en su lugar.
+  - Cubierto con pruebas automatizadas que reproducen exactamente el caso
+    reportado (mismo movimiento, `entry_reference` nulo y luego informado en
+    dos sincronizaciones sucesivas) y casos de no regresión (movimientos
+    distintos el mismo día, movimientos idénticos genuinos el mismo día,
+    bases de datos creadas antes de esta versión).
 
 **v0.4.0**
 - Corregido: los movimientos nuevos no se categorizaban solos al descargarse.

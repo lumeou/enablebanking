@@ -18,7 +18,7 @@ from .categories import match_category
 
 _LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_V1 = """
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
@@ -54,7 +54,12 @@ CREATE TABLE sync_log (
 );
 """
 
-MIGRATIONS: dict[int, str] = {1: SCHEMA_V1}
+SCHEMA_V2 = """
+ALTER TABLE transactions ADD COLUMN fingerprint TEXT;
+CREATE INDEX idx_tx_fingerprint ON transactions (account_hash, fingerprint);
+"""
+
+MIGRATIONS: dict[int, str] = {1: SCHEMA_V1, 2: SCHEMA_V2}
 
 
 def _to_float(value: Any) -> float | None:
@@ -106,10 +111,35 @@ def normalize_transaction(tx: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_text(value: str | None) -> str:
+    """Whitespace-collapse + casefold, so trivial formatting differences (double
+    spaces, upper/lower case) don't produce a different fingerprint for what is
+    otherwise the exact same bank-reported text."""
+    if not value:
+        return ""
+    return " ".join(value.split()).casefold()
+
+
+def _normalize_amount(amount_text: str | None) -> str:
+    """"6", "6.00" and 6 must all produce the same fingerprint. Falls back to the
+    stripped raw text if it isn't parseable as a number (better than crashing)."""
+    value = _to_float(amount_text)
+    if value is not None:
+        return f"{abs(value):.2f}"
+    return (amount_text or "").strip()
+
+
 def _fingerprint(n: dict[str, Any]) -> str:
+    """Stable identity for "is this the same real-world movement", independent of
+    which strong identifier (entry_reference/reference_number) the bank has
+    attached to it so far - those can legitimately be null on one sync and
+    populated on the next for the SAME transaction. Deliberately excludes
+    balance_after (can be absent or shift) and the three raw date fields
+    (replaced by the already-resolved effective_date)."""
     basis = json.dumps(
-        [n["booking_date"], n["value_date"], n["transaction_date"], n["amount_text"], n["indicator"],
-         n["counterparty"], n["remittance"], n["balance_after"]],
+        [n["effective_date"], _normalize_amount(n["amount_text"]), n["currency"], n["indicator"],
+         _normalize_text(n["counterparty"]), _normalize_text(n["counterparty_iban"]),
+         _normalize_text(n["remittance"])],
         sort_keys=True,
     )
     return hashlib.sha1(basis.encode()).hexdigest()
@@ -148,8 +178,25 @@ class Store:
         for target in range(version + 1, SCHEMA_VERSION + 1):
             with self._conn:
                 self._conn.executescript(MIGRATIONS[target])
+                if target == 2:
+                    self._backfill_fingerprints()
                 self._conn.execute(f"PRAGMA user_version={target}")
             _LOGGER.debug("Database migrated to schema %s", target)
+
+    def _backfill_fingerprints(self) -> None:
+        """Schema v2: computes the new content fingerprint for every row that
+        already exists, from the structured columns already stored for it, so
+        the dedup-promotion lookup in upsert_transactions() has something to
+        match against on the very next sync after this migration runs."""
+        assert self._conn is not None
+        rows = self._conn.execute(
+            "SELECT id, effective_date, amount_text, currency, indicator, counterparty, "
+            "counterparty_iban, remittance FROM transactions"
+        ).fetchall()
+        self._conn.executemany(
+            "UPDATE transactions SET fingerprint=? WHERE id=?",
+            [(_fingerprint(dict(r)), r["id"]) for r in rows],
+        )
 
     @staticmethod
     def delete_files(path: str) -> None:
@@ -250,35 +297,62 @@ class Store:
         below does not touch category/category_source, so whatever category was
         there before (set by a rule on an earlier sync, or by hand) is left alone;
         the computed value for that row is simply discarded by SQLite.
+
+        Dedup-key promotion: a bank can report a transaction's strong identifier
+        (entry_reference, and secondarily reference_number) as null on the first
+        sync and populate it days later for the SAME movement. If that happened,
+        the earlier sync already stored the row under a content-fingerprint key
+        (fp:...). Minting a fresh ref:/refnum: key for the later sync would create
+        a duplicate row instead of updating it. So before minting such a key we
+        check whether an existing, not-yet-promoted fp:-keyed row has the same
+        content fingerprint; if so we reuse ITS dedup_key, which makes the INSERT
+        below land on ON CONFLICT and simply backfill entry_reference/
+        reference_number onto that same row.
         """
         norm = [normalize_transaction(t) for t in txs]
+        for n in norm:
+            n["fingerprint"] = _fingerprint(n)
+
         ref_counts = Counter(n["entry_reference"] for n in norm
                              if n["entry_reference"] and n["status"] != "PDNG")
-        seen: Counter[str] = Counter()
-        rows: list[dict[str, Any]] = []
-        for n in reversed(norm):  # oldest first, so newer rows get higher ids
-            fp = _fingerprint(n)
-            if n["status"] == "PDNG":
-                seen["p" + fp] += 1
-                n["dedup_key"] = f"pdng:{fp}#{seen['p' + fp]}"
-            elif n["entry_reference"] and ref_counts[n["entry_reference"]] == 1:
-                n["dedup_key"] = f"ref:{n['entry_reference']}"
-            else:  # no (or duplicated) reference: content fingerprint + occurrence number
-                seen[fp] += 1
-                n["dedup_key"] = f"fp:{fp}#{seen[fp]}"
-            category = match_category(rules, n["counterparty"], n["remittance"], n["mcc"]) if rules else None
-            n["category"] = category
-            n["category_source"] = "rule" if category else None
-            rows.append(n)
+        refnum_counts = Counter(n["reference_number"] for n in norm
+                                if n["reference_number"] and n["status"] != "PDNG")
 
         new_rows: list[dict[str, Any]] = []
         updated = unchanged = 0
         with self._lock, self.conn:
-            existing = {r["dedup_key"]: r["content_hash"] for r in self.conn.execute(
-                "SELECT dedup_key, content_hash FROM transactions WHERE account_hash=? AND status!='PDNG'",
-                (account_hash,))}
+            existing_rows = self.conn.execute(
+                "SELECT dedup_key, content_hash, fingerprint FROM transactions "
+                "WHERE account_hash=? AND status!='PDNG'", (account_hash,)).fetchall()
+            existing = {r["dedup_key"]: r["content_hash"] for r in existing_rows}
+            # Only rows not yet promoted to a strong-identifier key are reuse candidates.
+            fp_to_dedup_key = {
+                r["fingerprint"]: r["dedup_key"] for r in existing_rows
+                if r["fingerprint"] and r["dedup_key"].startswith("fp:")
+            }
+
             # Pending rows are volatile: drop and recreate from this fetch.
             self.conn.execute("DELETE FROM transactions WHERE account_hash=? AND status='PDNG'", (account_hash,))
+
+            seen: Counter[str] = Counter()
+            rows: list[dict[str, Any]] = []
+            for n in reversed(norm):  # oldest first, so newer rows get higher ids
+                fp = n["fingerprint"]
+                if n["status"] == "PDNG":
+                    seen["p" + fp] += 1
+                    n["dedup_key"] = f"pdng:{fp}#{seen['p' + fp]}"
+                elif n["entry_reference"] and ref_counts[n["entry_reference"]] == 1:
+                    n["dedup_key"] = fp_to_dedup_key.get(fp, f"ref:{n['entry_reference']}")
+                elif n["reference_number"] and refnum_counts[n["reference_number"]] == 1:
+                    n["dedup_key"] = fp_to_dedup_key.get(fp, f"refnum:{n['reference_number']}")
+                else:  # no (or duplicated) strong identifier: content fingerprint + occurrence number
+                    seen[fp] += 1
+                    n["dedup_key"] = f"fp:{fp}#{seen[fp]}"
+                category = match_category(rules, n["counterparty"], n["remittance"], n["mcc"]) if rules else None
+                n["category"] = category
+                n["category_source"] = "rule" if category else None
+                rows.append(n)
+
             for n in rows:
                 if n["status"] != "PDNG":
                     if n["dedup_key"] not in existing:
@@ -291,14 +365,15 @@ class Store:
                     """INSERT INTO transactions (account_hash, dedup_key, entry_reference, status, booking_date,
                         value_date, transaction_date, effective_date, amount, amount_text, currency, indicator,
                         counterparty, counterparty_iban, remittance, note, mcc, bank_code, bank_code_desc,
-                        balance_after, reference_number, raw_json, content_hash, category, category_source,
-                        first_seen, last_seen)
+                        balance_after, reference_number, raw_json, content_hash, fingerprint, category,
+                        category_source, first_seen, last_seen)
                        VALUES (:account_hash, :dedup_key, :entry_reference, :status, :booking_date, :value_date,
                         :transaction_date, :effective_date, :amount, :amount_text, :currency, :indicator,
                         :counterparty, :counterparty_iban, :remittance, :note, :mcc, :bank_code, :bank_code_desc,
-                        :balance_after, :reference_number, :raw_json, :content_hash, :category, :category_source,
-                        :now, :now)
+                        :balance_after, :reference_number, :raw_json, :content_hash, :fingerprint, :category,
+                        :category_source, :now, :now)
                        ON CONFLICT(account_hash, dedup_key) DO UPDATE SET
+                        entry_reference=excluded.entry_reference,
                         status=excluded.status, booking_date=excluded.booking_date, value_date=excluded.value_date,
                         transaction_date=excluded.transaction_date, effective_date=excluded.effective_date,
                         amount=excluded.amount, amount_text=excluded.amount_text, currency=excluded.currency,
@@ -308,7 +383,8 @@ class Store:
                         bank_code_desc=excluded.bank_code_desc, balance_after=excluded.balance_after,
                         reference_number=excluded.reference_number, raw_json=excluded.raw_json,
                         revisions=transactions.revisions + (transactions.content_hash != excluded.content_hash),
-                        content_hash=excluded.content_hash, last_seen=excluded.last_seen""",
+                        content_hash=excluded.content_hash, fingerprint=excluded.fingerprint,
+                        last_seen=excluded.last_seen""",
                     {**n, "account_hash": account_hash, "now": now})
         return {"new": new_rows, "updated": updated, "unchanged": unchanged}
 
