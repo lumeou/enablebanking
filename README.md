@@ -4,7 +4,13 @@ Integración personalizada, en desarrollo, para leer saldos y movimientos bancar
 (vía [Enable Banking](https://enablebanking.com)) desde Home Assistant, con una
 base de datos local propia para auditar y categorizar los movimientos.
 
-**Versión actual: 0.4.1.** Registro de cambios al final del documento.
+**Versión actual: 0.4.1** · **Licencia:** [MIT](LICENSE). Registro de cambios al
+final del documento.
+
+**Estado del proyecto:** lo mantengo en mi tiempo libre para uso propio. Reviso
+*issues* y *pull requests* cuando puedo, pero sin tiempos de respuesta
+garantizados. Es software que lee tus movimientos bancarios: revisa el código
+antes de usarlo, igual que harías con cualquier integración de este tipo.
 
 ---
 
@@ -14,10 +20,14 @@ base de datos local propia para auditar y categorizar los movimientos.
    `/config/enablebanking/private.key` en el servidor de Home Assistant.
    **Nunca** en `/config/www` (esa carpeta es pública en `/local/`); el asistente
    de configuración rechaza esa ruta.
-2. **Componente:** copia la carpeta `custom_components/enablebanking` a
-   `/config/custom_components/`.
+2. **Componente:**
+   - **Vía HACS (recomendado):** HACS → menú (⋮, arriba a la derecha) →
+     *Repositorios personalizados* → añade `https://github.com/lumeou/enablebanking`
+     como categoría *Integración* → busca "Enable Banking" en HACS → *Descargar*.
+   - **Manual:** copia la carpeta `custom_components/enablebanking` de este
+     repositorio a `/config/custom_components/`.
 3. **URL de redirección** en el panel de Enable Banking: debe ser exactamente
-   `https://<tu-dominio-local>:8123/enablebanking/callback`. **HTTPS es
+   `https://<tu-dominio-local>/enablebanking/callback`. **HTTPS es
    obligatorio** en aplicaciones de producción (el sandbox admite HTTP plano).
    Home Assistant necesita entonces tener HTTPS activado (certificado autofirmado
    vale, con resolución local por mDNS/`.local` o tu propio dominio).
@@ -53,10 +63,14 @@ veces al día se les puede consultar sin que el usuario esté delante.
 - **Si caduca la autorización (401):** los sensores **no desaparecen** — siguen
   mostrando los últimos datos guardados — y Home Assistant pide reautenticar
   desde Ajustes → Dispositivos y servicios.
-- **Deduplicación:** usa `entry_reference` cuando el banco lo da y es único; si
-  no, una huella con fecha, importe, contraparte y saldo posterior. Los
-  movimientos pendientes (`PDNG`) se sustituyen en cada consulta, nunca se
-  acumulan.
+- **Deduplicación:** usa `entry_reference` o `reference_number` cuando el banco
+  los da y son únicos; si no, una huella de contenido (fecha efectiva, importe,
+  contraparte y concepto normalizados — nunca el saldo posterior, que puede
+  variar entre consultas del mismo movimiento). Si el identificador fuerte
+  llega más tarde para un movimiento ya guardado por huella, se reconoce y se
+  actualiza la misma fila en vez de duplicarla (detalle en el registro de
+  cambios, v0.4.1). Los movimientos pendientes (`PDNG`) se sustituyen en cada
+  consulta, nunca se acumulan.
 - **Al eliminar una integración:** se cierra el consentimiento en el banco **y se
   borra su base de datos local**. Para recuperar el histórico, vuelve a añadir la
   integración y vincula la cuenta de nuevo (consume una autorización, pero no
